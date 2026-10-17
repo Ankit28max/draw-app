@@ -24,7 +24,20 @@ import {
     X,
     Download,
     Terminal,
-    Sparkles
+    Sparkles,
+    Database,
+    Zap,
+    Cloud,
+    Shield,
+    Cpu,
+    Radio,
+    Boxes,
+    ChevronDown,
+    Play,
+    Square,
+    Activity,
+    BookOpen,
+    Layers
 } from "lucide-react";
 import { Game, Tool, PresenceUser, Shape, TextEditSession } from "@/draw/Game";
 import Link from "next/link";
@@ -69,12 +82,33 @@ export function Canvas({
     const [selectedShape, setSelectedShape] = useState<Shape | null>(null);
     const [activeTextSession, setActiveTextSession] = useState<TextEditSession | null>(null);
     const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+    const [isArchMenuOpen, setIsArchMenuOpen] = useState(false);
+    const archMenuRef = useRef<HTMLDivElement>(null);
+    const [isTemplatesMenuOpen, setIsTemplatesMenuOpen] = useState(false);
+    const templatesMenuRef = useRef<HTMLDivElement>(null);
+    const [isSimulatingFlow, setIsSimulatingFlow] = useState(false);
     const [shapeCount, setShapeCount] = useState(0);
 
     const startTextEditSession = (session: TextEditSession) => {
         sessionMountedAtRef.current = Date.now();
         setActiveTextSession(session);
     };
+
+    // Close menus when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (archMenuRef.current && !archMenuRef.current.contains(e.target as Node)) {
+                setIsArchMenuOpen(false);
+            }
+            if (templatesMenuRef.current && !templatesMenuRef.current.contains(e.target as Node)) {
+                setIsTemplatesMenuOpen(false);
+            }
+        };
+        if (isArchMenuOpen || isTemplatesMenuOpen) {
+            document.addEventListener("mousedown", handleClickOutside);
+        }
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [isArchMenuOpen, isTemplatesMenuOpen]);
 
     // Global developer shortcut: Cmd+K or Ctrl+K opens DevCommandPalette
     useEffect(() => {
@@ -87,6 +121,24 @@ export function Canvas({
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
+
+    // Global keyboard deletion for selected shape (Delete / Backspace)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Do not delete shape if user is typing in an input or textarea
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+            if (e.key === "Delete" || e.key === "Backspace" || e.code === "Delete" || e.code === "Backspace") {
+                if (selectedShape) {
+                    e.preventDefault();
+                    gameRef.current?.deleteSelectedShape();
+                }
+            }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [selectedShape]);
     const [dimensions, setDimensions] = useState({
         width: typeof window !== "undefined" ? window.innerWidth : 1200,
         height: typeof window !== "undefined" ? window.innerHeight : 800,
@@ -142,6 +194,7 @@ export function Canvas({
             };
             gameRef.current.onToolChange = (tool) => setSelectedTool(tool);
             gameRef.current.onStartTextEdit = (session) => startTextEditSession(session);
+            gameRef.current.onSimulationChange = (isActive) => setIsSimulatingFlow(isActive);
             return;
         }
 
@@ -166,6 +219,7 @@ export function Canvas({
         };
         g.onToolChange = (tool) => setSelectedTool(tool);
         g.onStartTextEdit = (session) => startTextEditSession(session);
+        g.onSimulationChange = (isActive) => setIsSimulatingFlow(isActive);
         gameRef.current = g;
 
         return () => {
@@ -308,16 +362,6 @@ export function Canvas({
                     onClick={() => gameRef.current?.redo()}
                     icon={<Redo2 className="w-4 h-4" />}
                 />
-                <IconButton
-                    title="Clear Canvas"
-                    onClick={() => {
-                        if (confirm("Are you sure you want to clear the entire whiteboard?")) {
-                            gameRef.current?.clearRoom();
-                        }
-                    }}
-                    icon={<Trash2 className="w-4 h-4 text-red-400" />}
-                />
-
                 <div className="h-5 w-px bg-zinc-700 mx-0.5" />
 
                 {/* Style toggle */}
@@ -330,12 +374,351 @@ export function Canvas({
 
                 <div className="h-5 w-px bg-zinc-700 mx-0.5" />
 
-                {/* Export PNG */}
-                <IconButton
-                    title="Export Canvas to PNG (High-Res)"
-                    onClick={() => gameRef.current?.exportImage()}
-                    icon={<Download className="w-4 h-4 text-blue-400" />}
-                />
+                {/* System Design HLD & LLD Templates Dropdown */}
+                <div className="relative" ref={templatesMenuRef}>
+                    <button
+                        onClick={() => setIsTemplatesMenuOpen((prev) => !prev)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                            isTemplatesMenuOpen
+                                ? "bg-purple-600/20 text-purple-400 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.25)]"
+                                : "bg-zinc-800/80 text-zinc-300 border-zinc-700/60 hover:bg-zinc-800 hover:text-white hover:border-zinc-500"
+                        }`}
+                        title="Instant HLD & LLD System Design Templates"
+                    >
+                        <Layers className="w-3.5 h-3.5 text-purple-400" />
+                        <span className="hidden sm:inline">Templates</span>
+                        <ChevronDown className={`w-3 h-3 text-zinc-400 transition-transform ${isTemplatesMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {isTemplatesMenuOpen && (
+                        <div className="absolute top-full mt-2.5 left-1/2 -translate-x-1/2 w-80 bg-zinc-950/95 backdrop-blur-xl border border-zinc-700/80 rounded-2xl p-2 shadow-2xl z-50 flex flex-col gap-1 ring-1 ring-white/10">
+                            <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-semibold border-b border-zinc-800 flex items-center justify-between">
+                                <span>Architecture Starter Kits</span>
+                                <span className="text-purple-400 font-mono text-[9px]">HLD & LLD</span>
+                            </div>
+
+                            {/* Featured: This App's Architecture */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.loadArchitectureTemplate("hld_this_app");
+                                    setIsTemplatesMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-cyan-500/15 hover:text-cyan-300 transition-colors cursor-pointer group bg-cyan-500/5 border border-cyan-500/25"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition-transform">
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate text-cyan-200 font-bold">This App's Architecture</span>
+                                        <span className="text-[9px] text-cyan-400 font-mono font-bold bg-cyan-500/20 px-1 py-0.5 rounded">FEATURED</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Next.js, WS :8080, HTTP :3001, Write-Behind & DB</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.loadArchitectureTemplate("hld_uber");
+                                    setIsTemplatesMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-purple-500/15 hover:text-purple-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 group-hover:scale-105 transition-transform">
+                                    <Activity className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Event Stream & Matching</span>
+                                        <span className="text-[9px] text-purple-400 font-mono">HLD</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Uber / Kafka / Redis Geo Cluster</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.loadArchitectureTemplate("hld_tinyurl");
+                                    setIsTemplatesMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-blue-500/15 hover:text-blue-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-transform">
+                                    <Zap className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">High-QPS URL Shortener</span>
+                                        <span className="text-[9px] text-blue-400 font-mono">HLD</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">TinyURL / Edge CDN / Base62 Core</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.loadArchitectureTemplate("lld_state_machine");
+                                    setIsTemplatesMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
+                                    <Shield className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Order State Machine & Sagas</span>
+                                        <span className="text-[9px] text-emerald-400 font-mono">LLD</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Idempotency & Stripe Gateways</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.loadArchitectureTemplate("lld_erd");
+                                    setIsTemplatesMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-amber-500/15 hover:text-amber-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
+                                    <Database className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Normalized Relational ERD</span>
+                                        <span className="text-[9px] text-amber-400 font-mono">LLD</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Users, Orders & Products PK/FK Schema</div>
+                                </div>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Architecture Nodes Quick Menu */}
+                <div className="relative" ref={archMenuRef}>
+                    <button
+                        onClick={() => setIsArchMenuOpen((prev) => !prev)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                            isArchMenuOpen
+                                ? "bg-blue-600/20 text-blue-400 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.25)]"
+                                : "bg-zinc-800/80 text-zinc-300 border-zinc-700/60 hover:bg-zinc-800 hover:text-white hover:border-zinc-500"
+                        }`}
+                        title="Architecture Components (Database, EC2, Backend Server, Redis, Load Balancer)"
+                    >
+                        <Database className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="hidden sm:inline">Components</span>
+                        <ChevronDown className={`w-3 h-3 text-zinc-400 transition-transform ${isArchMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {isArchMenuOpen && (
+                        <div className="absolute top-full mt-2.5 left-1/2 -translate-x-1/2 w-72 bg-zinc-950/95 backdrop-blur-xl border border-zinc-700/80 rounded-2xl p-2 shadow-2xl z-50 flex flex-col gap-1 ring-1 ring-white/10 max-h-[440px] overflow-y-auto">
+                            <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-semibold border-b border-zinc-800 flex items-center justify-between">
+                                <span>Architecture Shapes</span>
+                                <span className="text-blue-400 font-mono text-[9px]">Click & Drag</span>
+                            </div>
+
+                            {/* Database */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("database");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-blue-500/15 hover:text-blue-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-transform">
+                                    <Database className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">PostgreSQL DB</span>
+                                        <span className="text-[9px] text-blue-400/80 font-mono">DATABASE</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">SQL Schema & Primary Keys</div>
+                                </div>
+                            </button>
+
+                            {/* Backend Server */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("server");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-cyan-500/15 hover:text-cyan-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-105 transition-transform">
+                                    <Cpu className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Backend Server</span>
+                                        <span className="text-[9px] text-cyan-400/80 font-mono">NODE / GO</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Express REST API on :3001</div>
+                                </div>
+                            </button>
+
+                            {/* AWS EC2 Compute VM */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("ec2");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-orange-500/15 hover:text-orange-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 group-hover:scale-105 transition-transform">
+                                    <Boxes className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">AWS EC2 Instance</span>
+                                        <span className="text-[9px] text-orange-400/80 font-mono">COMPUTE</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">t4g.xlarge Linux Cloud VM</div>
+                                </div>
+                            </button>
+
+                            {/* Load Balancer */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("load_balancer");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-purple-500/15 hover:text-purple-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 group-hover:scale-105 transition-transform">
+                                    <Layers className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">L7 Load Balancer</span>
+                                        <span className="text-[9px] text-purple-400/80 font-mono">GATEWAY</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Cloudflare & Nginx Reverse Proxy</div>
+                                </div>
+                            </button>
+
+                            {/* Redis Cache */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("redis");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-red-500/15 hover:text-red-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 group-hover:scale-105 transition-transform">
+                                    <Zap className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Redis Cache</span>
+                                        <span className="text-[9px] text-red-400/80 font-mono">CACHE</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">In-memory TTL & Sessions</div>
+                                </div>
+                            </button>
+
+                            {/* Kafka Queue */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("queue");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
+                                    <Radio className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Kafka Queue</span>
+                                        <span className="text-[9px] text-emerald-400/80 font-mono">STREAM</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Event Bus & Partitioning</div>
+                                </div>
+                            </button>
+
+                            {/* Auth & Security Shield */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("security");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-amber-500/15 hover:text-amber-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
+                                    <Shield className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Auth & Shield</span>
+                                        <span className="text-[9px] text-amber-400/80 font-mono">SECURITY</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">JWT Auth & Rate Limiter</div>
+                                </div>
+                            </button>
+
+                            {/* Frontend Client */}
+                            <button
+                                onClick={() => {
+                                    gameRef.current?.insertTechComponent("client");
+                                    setIsArchMenuOpen(false);
+                                }}
+                                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-xs text-left text-zinc-200 hover:bg-blue-500/15 hover:text-blue-300 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-transform">
+                                    <Terminal className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold flex items-center justify-between">
+                                        <span className="truncate">Web / Mobile Client</span>
+                                        <span className="text-[9px] text-blue-400/80 font-mono">FRONTEND</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">Next.js 15 & React Native</div>
+                                </div>
+                            </button>
+
+                            <div className="border-t border-zinc-800/80 pt-1 mt-0.5">
+                                <button
+                                    onClick={() => {
+                                        setIsArchMenuOpen(false);
+                                        setIsCommandPaletteOpen(true);
+                                    }}
+                                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer font-mono"
+                                >
+                                    <span>More in Palette...</span>
+                                    <kbd className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-[10px] text-zinc-300">⌘K</kbd>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="h-5 w-px bg-zinc-700 mx-0.5" />
+
+                {/* Simulate Request Flow Button */}
+                <button
+                    onClick={() => gameRef.current?.toggleFlowSimulation()}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                        isSimulatingFlow
+                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
+                            : "bg-zinc-800/80 text-zinc-300 border-zinc-700/60 hover:bg-emerald-500/10 hover:text-emerald-300 hover:border-emerald-500/40"
+                    }`}
+                    title={isSimulatingFlow ? "Stop Flow Simulation" : "Simulate Live Request Flow along connectors"}
+                >
+                    {isSimulatingFlow ? (
+                        <>
+                            <Square className="w-3.5 h-3.5 fill-current" />
+                            <span className="hidden sm:inline">Flow Live</span>
+                        </>
+                    ) : (
+                        <>
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span className="hidden sm:inline">Simulate Flow</span>
+                        </>
+                    )}
+                </button>
 
                 <div className="h-5 w-px bg-zinc-700 mx-0.5" />
 
@@ -387,13 +770,79 @@ export function Canvas({
                 <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-zinc-900/95 backdrop-blur-md border border-blue-500/60 rounded-xl px-3.5 py-1.5 shadow-2xl text-xs text-zinc-200">
                     <span className="capitalize font-medium text-blue-400 flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-                        {selectedShape.type} selected
+                        {selectedShape.type === "tech_node"
+                            ? `${(selectedShape as any).title || "Architecture Icon"}`
+                            : `${selectedShape.type} selected`}
                     </span>
                     <span className="text-zinc-600">|</span>
                     <span className="text-[11px] text-zinc-400 hidden sm:inline">
-                        {selectedShape.type === "text" ? "Double-click to edit • Drag to move" : "Drag to move"}
+                        {selectedShape.type === "text"
+                            ? "Double-click to edit • Drag to move"
+                            : selectedShape.type === "tech_node"
+                            ? "Drag handles to resize • Double-click to edit"
+                            : "Drag handles to resize • Drag to move"}
                     </span>
                     <span className="text-zinc-600 hidden sm:inline">|</span>
+
+                    {/* Quick Size Controls for Architecture Icons */}
+                    {selectedShape.type === "tech_node" && (
+                        <>
+                            <div className="flex items-center gap-1 bg-zinc-800/90 px-1.5 py-0.5 rounded-lg border border-zinc-700/60">
+                                <span className="text-[10px] font-mono text-zinc-400 mr-0.5">Size:</span>
+                                <button
+                                    onClick={() => gameRef.current?.scaleSelectedShape(0.85)}
+                                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-300 hover:text-white font-bold text-xs cursor-pointer"
+                                    title="Scale smaller (-15%)"
+                                >
+                                    -
+                                </button>
+                                <button
+                                    onClick={() => gameRef.current?.scaleSelectedShape(1.18)}
+                                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-700 text-zinc-300 hover:text-white font-bold text-xs cursor-pointer"
+                                    title="Scale larger (+18%)"
+                                >
+                                    +
+                                </button>
+                                <div className="h-3 w-px bg-zinc-700 mx-0.5" />
+                                <button
+                                    onClick={() => gameRef.current?.resizeSelectedShape(120, 85)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-zinc-700 text-zinc-300 hover:text-white cursor-pointer"
+                                    title="Compact size (120 × 85)"
+                                >
+                                    S
+                                </button>
+                                <button
+                                    onClick={() => gameRef.current?.resizeSelectedShape(150, 110)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-zinc-700 text-zinc-300 hover:text-white cursor-pointer font-bold text-blue-400"
+                                    title="Standard size (150 × 110)"
+                                >
+                                    M
+                                </button>
+                                <button
+                                    onClick={() => gameRef.current?.resizeSelectedShape(200, 140)}
+                                    className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-zinc-700 text-zinc-300 hover:text-white cursor-pointer"
+                                    title="Large size (200 × 140)"
+                                >
+                                    L
+                                </button>
+                            </div>
+                            <span className="text-zinc-600">|</span>
+                        </>
+                    )}
+
+                    {(selectedShape.type === "tech_node" || selectedShape.type === "text") && (
+                        <>
+                            <button
+                                onClick={() => gameRef.current?.startEditingSelectedShape()}
+                                className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-500/10 cursor-pointer font-medium"
+                                title="Edit text (Double-click or press Enter)"
+                            >
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span>Edit Label</span>
+                            </button>
+                            <span className="text-zinc-600">|</span>
+                        </>
+                    )}
                     <button
                         onClick={() => gameRef.current?.deleteSelectedShape()}
                         className="flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors p-1 rounded hover:bg-zinc-800 cursor-pointer font-medium"
@@ -585,6 +1034,103 @@ export function Canvas({
                 >
                     {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copied ? "Copied" : "Share"}</span>
+                </button>
+            </div>
+
+            {/* Left Quick Architecture Components Dock */}
+            <div className="fixed left-4 top-1/2 -translate-y-1/2 z-40 hidden sm:flex flex-col gap-1.5 p-1.5 bg-zinc-900/90 backdrop-blur-xl border border-zinc-700/60 rounded-2xl shadow-2xl">
+                <div className="text-[9px] font-mono uppercase text-zinc-500 font-bold text-center py-1">
+                    Nodes
+                </div>
+                
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("database")}
+                    className="p-2 rounded-xl text-blue-400 hover:bg-blue-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert PostgreSQL Database"
+                >
+                    <Database className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        PostgreSQL Database
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("server")}
+                    className="p-2 rounded-xl text-cyan-400 hover:bg-cyan-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert Backend Server"
+                >
+                    <Cpu className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        Backend Server (Express / Node)
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("ec2")}
+                    className="p-2 rounded-xl text-orange-400 hover:bg-orange-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert AWS EC2 Instance"
+                >
+                    <Boxes className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        AWS EC2 Virtual Machine
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("load_balancer")}
+                    className="p-2 rounded-xl text-purple-400 hover:bg-purple-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert L7 Load Balancer"
+                >
+                    <Layers className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        Load Balancer / Proxy
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("redis")}
+                    className="p-2 rounded-xl text-red-400 hover:bg-red-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert Redis Cache"
+                >
+                    <Zap className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        Redis Cache (In-Memory)
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("queue")}
+                    className="p-2 rounded-xl text-emerald-400 hover:bg-emerald-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert Kafka Event Bus"
+                >
+                    <Radio className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        Kafka Event Bus
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => gameRef.current?.insertTechComponent("security")}
+                    className="p-2 rounded-xl text-amber-400 hover:bg-amber-500/20 hover:scale-105 transition-all cursor-pointer group relative"
+                    title="Insert Auth & Shield"
+                >
+                    <Shield className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50">
+                        Auth & Security Shield
+                    </span>
+                </button>
+
+                <div className="h-px bg-zinc-800 my-0.5" />
+
+                <button
+                    onClick={() => setIsCommandPaletteOpen(true)}
+                    className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all cursor-pointer group relative"
+                    title="Open Command Palette (⌘K)"
+                >
+                    <Terminal className="w-4 h-4" />
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-zinc-950 border border-zinc-700 text-white text-[11px] font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl z-50 font-mono">
+                        Command Palette (⌘K)
+                    </span>
                 </button>
             </div>
 

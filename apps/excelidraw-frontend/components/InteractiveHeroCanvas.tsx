@@ -35,9 +35,29 @@ export function InteractiveHeroCanvas() {
         if (!ctx) return;
 
         let animId: number;
+        let flowProgress = 0;
+
+        const getBezierPoint = (
+            p0x: number, p0y: number,
+            p1x: number, p1y: number,
+            p2x: number, p2y: number,
+            p3x: number, p3y: number,
+            t: number
+        ) => {
+            const u = 1 - t;
+            const tt = t * t;
+            const uu = u * u;
+            const uuu = uu * u;
+            const ttt = tt * t;
+
+            const x = uuu * p0x + 3 * uu * t * p1x + 3 * u * tt * p2x + ttt * p3x;
+            const y = uuu * p0y + 3 * uu * t * p1y + 3 * u * tt * p2y + ttt * p3y;
+            return { x, y };
+        };
 
         const drawMockDiagram = () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            flowProgress = (flowProgress + 0.007) % 1;
 
             // Draw subtle dot grid
             ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
@@ -49,44 +69,137 @@ export function InteractiveHeroCanvas() {
                 }
             }
 
-            // Draw Node: Client
-            drawNode(ctx, 80, 100, 140, 70, "Frontend Client", "Next.js 15 App", "#3b82f6");
+            // Draw Authentic Architectural Vector Icons
+            // 1. Client Monitor
+            drawMonitor(ctx, 50, 105, 150, 75, "Frontend Client", "Next.js 15 App", "#38bdf8");
 
-            // Draw Node: API Gateway
-            drawNode(ctx, 300, 100, 150, 70, "API Gateway", "WebSocket & HTTP", "#8b5cf6");
+            // 2. Gateway Router Hexagon
+            drawGateway(ctx, 280, 105, 150, 75, "Envoy Gateway", "HTTP/2 & WS Multiplex", "#a855f7");
 
-            // Draw Node: Worker Service
-            drawNode(ctx, 530, 70, 150, 65, "Sync Engine", "Pub/Sub Broadcast", "#10b981");
+            // 3. Compute Processor Chip (Sync Engine)
+            drawChip(ctx, 530, 50, 160, 75, "Sync Engine Pod", "Kafka Real-Time Fanout", "#10b981");
 
-            // Draw Node: PostgreSQL
-            drawNode(ctx, 530, 180, 150, 65, "PostgreSQL", "Prisma Persistence", "#f59e0b");
+            // 4. Database 3D Cylinder (Sharded PostgreSQL)
+            drawDatabase(ctx, 530, 175, 160, 80, "PostgreSQL Master", "Row-Level Replication", "#f59e0b");
 
-            // Connecting Arrows with subtle glow
-            drawSmoothArrow(ctx, 220, 135, 300, 135, "#3b82f6");
-            drawSmoothArrow(ctx, 450, 125, 530, 100, "#8b5cf6");
-            drawSmoothArrow(ctx, 450, 145, 530, 210, "#f59e0b");
+            // Connecting Arrows with subtle glow & animated packets
+            drawFlowArrow(ctx, 200, 142, 280, 142, "#38bdf8", flowProgress, "POST /v1 (18ms)");
+            drawFlowArrow(ctx, 430, 130, 530, 87, "#a855f7", (flowProgress + 0.35) % 1, "Kafka Pub/Sub (2ms)");
+            drawFlowArrow(ctx, 430, 155, 530, 215, "#f59e0b", (flowProgress + 0.7) % 1, "WAL Commit (6ms)");
 
             animId = requestAnimationFrame(drawMockDiagram);
         };
 
-        const drawNode = (
+        // 1. Client Monitor Contour
+        const drawMonitor = (
             c: CanvasRenderingContext2D,
-            x: number,
-            y: number,
-            w: number,
-            h: number,
-            title: string,
-            subtitle: string,
-            color: string
+            x: number, y: number, w: number, h: number,
+            title: string, subtitle: string, color: string
         ) => {
             c.save();
-            // Glass background
-            c.fillStyle = "rgba(24, 24, 27, 0.85)";
+            const screenH = h * 0.78;
+            c.fillStyle = "rgba(10, 14, 23, 0.92)";
             c.strokeStyle = color;
             c.lineWidth = 1.5;
             if (typeof c.roundRect === "function") {
                 c.beginPath();
-                c.roundRect(x, y, w, h, 12);
+                c.roundRect(x, y, w, screenH, 8);
+                c.fill();
+                c.stroke();
+            } else {
+                c.fillRect(x, y, w, screenH);
+                c.strokeRect(x, y, w, screenH);
+            }
+            // Stand neck & base
+            c.fillStyle = "#27272a";
+            c.fillRect(x + w / 2 - 5, y + screenH, 10, h - screenH - 4);
+            c.fillRect(x + w / 2 - 25, y + h - 4, 50, 4);
+
+            // Text
+            c.fillStyle = color;
+            c.font = "bold 9px ui-monospace, monospace";
+            c.fillText("CLIENT", x + 16, y + 20);
+            c.fillStyle = "#ffffff";
+            c.font = "bold 12px -apple-system, sans-serif";
+            c.fillText(title, x + 16, y + 36);
+            c.fillStyle = "rgba(161, 161, 170, 0.9)";
+            c.font = "10px ui-monospace, monospace";
+            c.fillText(subtitle, x + 16, y + 51);
+            c.restore();
+        };
+
+        // 2. Gateway Router Hexagon Contour
+        const drawGateway = (
+            c: CanvasRenderingContext2D,
+            x: number, y: number, w: number, h: number,
+            title: string, subtitle: string, color: string
+        ) => {
+            c.save();
+            c.fillStyle = "rgba(10, 14, 23, 0.92)";
+            c.strokeStyle = color;
+            c.lineWidth = 1.5;
+            const cx = x + w / 2;
+            const cy = y + h / 2;
+            c.beginPath();
+            c.moveTo(cx, y);
+            c.lineTo(x + w, y + h * 0.25);
+            c.lineTo(x + w, y + h * 0.75);
+            c.lineTo(cx, y + h);
+            c.lineTo(x, y + h * 0.75);
+            c.lineTo(x, y + h * 0.25);
+            c.closePath();
+            c.fill();
+            c.stroke();
+
+            // Text
+            c.textAlign = "center";
+            c.fillStyle = color;
+            c.font = "bold 9px ui-monospace, monospace";
+            c.fillText("GATEWAY", cx, cy - 14);
+            c.fillStyle = "#ffffff";
+            c.font = "bold 12px -apple-system, sans-serif";
+            c.fillText(title, cx, cy + 2);
+            c.fillStyle = "rgba(161, 161, 170, 0.9)";
+            c.font = "10px ui-monospace, monospace";
+            c.fillText(subtitle, cx, cy + 18);
+            c.restore();
+        };
+
+        // 3. Compute Processor Chip Contour
+        const drawChip = (
+            c: CanvasRenderingContext2D,
+            x: number, y: number, w: number, h: number,
+            title: string, subtitle: string, color: string
+        ) => {
+            c.save();
+            c.strokeStyle = color;
+            c.lineWidth = 1.5;
+            // Pins top/bottom
+            for (let i = 0; i < 4; i++) {
+                const px = x + 25 + i * (w - 50) / 3;
+                c.beginPath();
+                c.moveTo(px, y - 6);
+                c.lineTo(px, y);
+                c.moveTo(px, y + h);
+                c.lineTo(px, y + h + 6);
+                c.stroke();
+            }
+            // Pins left/right
+            for (let i = 0; i < 3; i++) {
+                const py = y + 18 + i * (h - 36) / 2;
+                c.beginPath();
+                c.moveTo(x - 6, py);
+                c.lineTo(x, py);
+                c.moveTo(x + w, py);
+                c.lineTo(x + w + 6, py);
+                c.stroke();
+            }
+
+            // Ceramic body
+            c.fillStyle = "rgba(10, 14, 23, 0.92)";
+            if (typeof c.roundRect === "function") {
+                c.beginPath();
+                c.roundRect(x, y, w, h, 8);
                 c.fill();
                 c.stroke();
             } else {
@@ -94,39 +207,147 @@ export function InteractiveHeroCanvas() {
                 c.strokeRect(x, y, w, h);
             }
 
-            // Header dot
+            // Pin 1 marker dot
             c.fillStyle = color;
             c.beginPath();
-            c.arc(x + 16, y + 22, 4, 0, Math.PI * 2);
+            c.arc(x + 10, y + 10, 2.5, 0, Math.PI * 2);
             c.fill();
 
             // Text
+            c.fillStyle = color;
+            c.font = "bold 9px ui-monospace, monospace";
+            c.fillText("COMPUTE", x + 20, y + 20);
             c.fillStyle = "#ffffff";
-            c.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
-            c.fillText(title, x + 28, y + 26);
-
+            c.font = "bold 12px -apple-system, sans-serif";
+            c.fillText(title, x + 20, y + 38);
             c.fillStyle = "rgba(161, 161, 170, 0.9)";
-            c.font = "11px -apple-system, BlinkMacSystemFont, sans-serif";
-            c.fillText(subtitle, x + 28, y + 46);
+            c.font = "10px ui-monospace, monospace";
+            c.fillText(subtitle, x + 20, y + 54);
             c.restore();
         };
 
-        const drawSmoothArrow = (
+        // 4. 3D Cylinder Database Contour
+        const drawDatabase = (
+            c: CanvasRenderingContext2D,
+            x: number, y: number, w: number, h: number,
+            title: string, subtitle: string, color: string
+        ) => {
+            c.save();
+            const ry = 14;
+            const cx = x + w / 2;
+            const topY = y + ry;
+            const botY = y + h - ry;
+
+            // Cylinder body
+            c.fillStyle = "rgba(10, 14, 23, 0.92)";
+            c.strokeStyle = color;
+            c.lineWidth = 1.5;
+
+            c.beginPath();
+            c.moveTo(x, topY);
+            c.lineTo(x, botY);
+            c.ellipse(cx, botY, w / 2, ry, 0, Math.PI, 0, true);
+            c.lineTo(x + w, topY);
+            c.ellipse(cx, topY, w / 2, ry, 0, 0, Math.PI, false);
+            c.closePath();
+            c.fill();
+            c.stroke();
+
+            // Top Cap Ellipse
+            c.fillStyle = "#0d1117";
+            c.beginPath();
+            c.ellipse(cx, topY, w / 2, ry, 0, 0, Math.PI * 2);
+            c.fill();
+            c.stroke();
+
+            // Partition Stripe
+            const midY = topY + (botY - topY) * 0.45;
+            c.setLineDash([3, 3]);
+            c.beginPath();
+            c.ellipse(cx, midY, w / 2, ry, 0, 0, Math.PI, false);
+            c.stroke();
+            c.setLineDash([]);
+
+            // Text
+            c.textAlign = "center";
+            c.fillStyle = color;
+            c.font = "bold 9px ui-monospace, monospace";
+            c.fillText("DATABASE", cx, midY - 6);
+            c.fillStyle = "#ffffff";
+            c.font = "bold 12px -apple-system, sans-serif";
+            c.fillText(title, cx, midY + 12);
+            c.fillStyle = "rgba(161, 161, 170, 0.9)";
+            c.font = "10px ui-monospace, monospace";
+            c.fillText(subtitle, cx, midY + 26);
+            c.restore();
+        };
+
+        const drawFlowArrow = (
             c: CanvasRenderingContext2D,
             fromX: number,
             fromY: number,
             toX: number,
             toY: number,
-            color: string
+            color: string,
+            t: number,
+            badgeLabel: string
         ) => {
+            const ctrlX1 = fromX + (toX - fromX) / 2;
+            const ctrlY1 = fromY;
+            const ctrlX2 = fromX + (toX - fromX) / 2;
+            const ctrlY2 = toY;
+
             c.save();
             c.strokeStyle = color;
             c.lineWidth = 2;
             c.setLineDash([4, 4]);
             c.beginPath();
             c.moveTo(fromX, fromY);
-            c.bezierCurveTo(fromX + (toX - fromX) / 2, fromY, fromX + (toX - fromX) / 2, toY, toX, toY);
+            c.bezierCurveTo(ctrlX1, ctrlY1, ctrlX2, ctrlY2, toX, toY);
             c.stroke();
+            c.setLineDash([]);
+
+            // Draw glowing flowing packet
+            const pt = getBezierPoint(fromX, fromY, ctrlX1, ctrlY1, ctrlX2, ctrlY2, toX, toY, t);
+
+            // Outer glow
+            c.shadowColor = color;
+            c.shadowBlur = 10;
+            c.fillStyle = color;
+            c.beginPath();
+            c.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+            c.fill();
+
+            // Inner bright core
+            c.fillStyle = "#ffffff";
+            c.beginPath();
+            c.arc(pt.x, pt.y, 2.5, 0, Math.PI * 2);
+            c.fill();
+
+            // Telemetry micro tag
+            c.shadowBlur = 0;
+            c.fillStyle = "rgba(15, 23, 42, 0.92)";
+            c.strokeStyle = color;
+            c.lineWidth = 1;
+            const tagW = c.measureText(badgeLabel).width + 12;
+            const tagH = 16;
+            const tagX = pt.x - tagW / 2;
+            const tagY = pt.y - 20;
+
+            if (typeof c.roundRect === "function") {
+                c.beginPath();
+                c.roundRect(tagX, tagY, tagW, tagH, 4);
+                c.fill();
+                c.stroke();
+            } else {
+                c.fillRect(tagX, tagY, tagW, tagH);
+                c.strokeRect(tagX, tagY, tagW, tagH);
+            }
+
+            c.fillStyle = "#38bdf8";
+            c.font = "9px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+            c.fillText(badgeLabel, tagX + 6, tagY + 11);
+
             c.restore();
         };
 
@@ -154,9 +375,13 @@ export function InteractiveHeroCanvas() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-[11px] font-medium hidden sm:flex">
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                            Flow Simulation Active
+                        </span>
                         <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[11px] font-medium">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            WebSocket Connected
+                            Multiplayer Sync
                         </span>
                     </div>
                 </div>

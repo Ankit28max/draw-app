@@ -76,8 +76,12 @@ function broadcastRoomPresence(roomId: string) {
 
 function checkUser(token: string): string {
   try {
-    if (token) {
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId?: string };
+    let cleanToken = token ? token.trim() : "";
+    if (cleanToken.startsWith("Bearer ")) {
+      cleanToken = cleanToken.slice(7).trim();
+    }
+    if (cleanToken) {
+      const decoded = jwt.verify(cleanToken, JWT_SECRET) as { userId?: string };
       if (decoded && decoded.userId) {
         return decoded.userId;
       }
@@ -255,8 +259,8 @@ wss.on('connection', function connection(ws: WebSocket, request) {
 
   ws.on('message', async function message(data) {
     // Guard against oversized payload attacks (>512KB)
-    if (typeof data === "string" && data.length > 524288) return;
-    if (Buffer.isBuffer(data) && data.length > 524288) return;
+    const rawLen = Buffer.isBuffer(data) ? data.length : typeof (data as any) === "string" ? (data as any).length : 0;
+    if (rawLen > 524288) return;
 
     let parsedData: any;
     try {
@@ -439,6 +443,12 @@ wss.on('connection', function connection(ws: WebSocket, request) {
         type: "clear_canvas",
         roomId: roomIdStr
       }));
+      return;
+    }
+
+    if (parsedData.type === "flow_simulation_toggle") {
+      const roomIdStr = String(parsedData.roomId);
+      broadcastToRoom(roomIdStr, ws, JSON.stringify(parsedData));
       return;
     }
   });

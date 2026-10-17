@@ -3,7 +3,10 @@ import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/backend-common/config";
 
 export function middleware(req: Request, res: Response, next: NextFunction): void {
-    const token = req.headers["authorization"] ?? "";
+    let token = req.headers["authorization"] ?? "";
+    if (token.startsWith("Bearer ")) {
+        token = token.slice(7).trim();
+    }
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET) as { userId?: string };

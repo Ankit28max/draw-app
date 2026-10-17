@@ -16,7 +16,12 @@ import {
     Search,
     X,
     Check,
-    Boxes
+    Boxes,
+    Cloud,
+    Shield,
+    Play,
+    Activity,
+    Layers
 } from "lucide-react";
 import { Game } from "@/draw/Game";
 
@@ -30,7 +35,7 @@ interface CommandItem {
     id: string;
     title: string;
     description: string;
-    category: "Architecture Components" | "Dev Exports" | "Canvas Actions";
+    category: "Architecture Components" | "System Design Templates" | "Dev Exports" | "Canvas Actions";
     icon: any;
     color: string;
     shortcut?: string;
@@ -103,15 +108,77 @@ export function DevCommandPalette({ isOpen, onClose, game }: DevCommandPalettePr
             },
         },
         {
+            id: "comp-cloud",
+            title: "Insert Cloud Container Node",
+            description: "Docker / Kubernetes container pod with health probe",
+            category: "Architecture Components",
+            icon: Cloud,
+            color: "text-sky-400 bg-sky-500/10 border-sky-500/30",
+            shortcut: "⌘5",
+            action: () => {
+                game?.insertTechComponent("cloud");
+                onClose();
+            },
+        },
+        {
+            id: "comp-security",
+            title: "Insert Auth & Security Shield",
+            description: "JWT token verification, rate limiter, and CORS shield",
+            category: "Architecture Components",
+            icon: Shield,
+            color: "text-amber-400 bg-amber-500/10 border-amber-500/30",
+            shortcut: "⌘6",
+            action: () => {
+                game?.insertTechComponent("security");
+                onClose();
+            },
+        },
+        {
             id: "comp-terminal",
             title: "Insert Terminal / Code Snippet Node",
             description: "Dark code editor block with monospace syntax highlighting",
             category: "Architecture Components",
             icon: Terminal,
             color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30",
-            shortcut: "⌘5",
+            shortcut: "⌘7",
             action: () => {
                 game?.insertTechComponent("terminal");
+                onClose();
+            },
+        },
+        {
+            id: "comp-server",
+            title: "Insert Backend Server (Node.js / Express)",
+            description: "REST API service layer with health probes and route handlers",
+            category: "Architecture Components",
+            icon: Cpu,
+            color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30",
+            action: () => {
+                game?.insertTechComponent("server");
+                onClose();
+            },
+        },
+        {
+            id: "comp-ec2",
+            title: "Insert AWS EC2 Compute Node",
+            description: "Linux cloud virtual machine with vCPU, RAM, and OS specs",
+            category: "Architecture Components",
+            icon: Boxes,
+            color: "text-orange-400 bg-orange-500/10 border-orange-500/30",
+            action: () => {
+                game?.insertTechComponent("ec2");
+                onClose();
+            },
+        },
+        {
+            id: "comp-lb",
+            title: "Insert L7 Load Balancer / Reverse Proxy",
+            description: "Cloudflare & Nginx edge proxy with SSL termination and routing",
+            category: "Architecture Components",
+            icon: Layers,
+            color: "text-purple-400 bg-purple-500/10 border-purple-500/30",
+            action: () => {
+                game?.insertTechComponent("load_balancer");
                 onClose();
             },
         },
@@ -121,15 +188,91 @@ export function DevCommandPalette({ isOpen, onClose, game }: DevCommandPalettePr
             description: "Web application UI client tier",
             category: "Architecture Components",
             icon: Globe,
-            color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30",
-            shortcut: "⌘6",
+            color: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+            shortcut: "⌘8",
             action: () => {
                 game?.insertTechComponent("client");
                 onClose();
             },
         },
 
-        // 2. Dev Exports
+        // 2. System Design Templates & Simulation
+        {
+            id: "tpl-this-app",
+            title: "Load HLD: VectorCraft Architecture (This App)",
+            description: "Next.js 15 ➔ Cloudflare Proxy ➔ HTTP (:3001) & WS (:8080) ➔ Write-Behind Queue ➔ PostgreSQL",
+            category: "System Design Templates",
+            icon: Activity,
+            color: "text-cyan-400 bg-cyan-500/10 border-cyan-500/30",
+            shortcut: "⌘0",
+            action: () => {
+                game?.loadArchitectureTemplate("hld_this_app");
+                onClose();
+            },
+        },
+        {
+            id: "sim-toggle",
+            title: "Toggle Live Request Flow Simulation",
+            description: "Animate glowing data packets traveling along connectors with real-time latency",
+            category: "System Design Templates",
+            icon: Play,
+            color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
+            shortcut: "⌘S",
+            action: () => {
+                game?.toggleFlowSimulation();
+                onClose();
+            },
+        },
+        {
+            id: "tpl-uber",
+            title: "Load HLD: Real-Time Event & Ride Matching (Uber)",
+            description: "Mobile App ➔ Envoy Gateway ➔ Kafka Event Stream ➔ Redis Geo ➔ Matching Pod",
+            category: "System Design Templates",
+            icon: Activity,
+            color: "text-purple-400 bg-purple-500/10 border-purple-500/30",
+            action: () => {
+                game?.loadArchitectureTemplate("hld_uber");
+                onClose();
+            },
+        },
+        {
+            id: "tpl-tinyurl",
+            title: "Load HLD: High-Throughput URL Shortener (TinyURL)",
+            description: "Edge CDN Anycast ➔ URL Core ➔ Redis L1 Cache ➔ PostgreSQL Master/Replica",
+            category: "System Design Templates",
+            icon: Zap,
+            color: "text-blue-400 bg-blue-500/10 border-blue-500/30",
+            action: () => {
+                game?.loadArchitectureTemplate("hld_tinyurl");
+                onClose();
+            },
+        },
+        {
+            id: "tpl-state",
+            title: "Load LLD: Order Processing State Machine & Sagas",
+            description: "Pending ➔ Idempotency Guard ➔ Payment Authorizing ➔ Completed / Rollback",
+            category: "System Design Templates",
+            icon: Shield,
+            color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
+            action: () => {
+                game?.loadArchitectureTemplate("lld_state_machine");
+                onClose();
+            },
+        },
+        {
+            id: "tpl-erd",
+            title: "Load LLD: Normalized Relational Database Schema (ERD)",
+            description: "Users, Orders, OrderItems, Products tables with Primary and Foreign Keys",
+            category: "System Design Templates",
+            icon: Database,
+            color: "text-amber-400 bg-amber-500/10 border-amber-500/30",
+            action: () => {
+                game?.loadArchitectureTemplate("lld_erd");
+                onClose();
+            },
+        },
+
+        // 3. Dev Exports
         {
             id: "export-mermaid",
             title: "Copy as Mermaid.js Markdown",
