@@ -21,10 +21,15 @@ import {
     Users,
     MousePointer,
     Type,
-    X
+    X,
+    Download,
+    Terminal,
+    Sparkles
 } from "lucide-react";
 import { Game, Tool, PresenceUser, Shape, TextEditSession } from "@/draw/Game";
 import Link from "next/link";
+import { DevCommandPalette } from "./DevCommandPalette";
+import { DevTelemetryBar } from "./DevTelemetryBar";
 
 const STROKE_COLORS = [
     { label: "White", value: "#ffffff" },
@@ -63,11 +68,25 @@ export function Canvas({
     const [collaborators, setCollaborators] = useState<PresenceUser[]>([]);
     const [selectedShape, setSelectedShape] = useState<Shape | null>(null);
     const [activeTextSession, setActiveTextSession] = useState<TextEditSession | null>(null);
+    const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+    const [shapeCount, setShapeCount] = useState(0);
 
     const startTextEditSession = (session: TextEditSession) => {
         sessionMountedAtRef.current = Date.now();
         setActiveTextSession(session);
     };
+
+    // Global developer shortcut: Cmd+K or Ctrl+K opens DevCommandPalette
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+                e.preventDefault();
+                setIsCommandPaletteOpen((prev) => !prev);
+            }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, []);
     const [dimensions, setDimensions] = useState({
         width: typeof window !== "undefined" ? window.innerWidth : 1200,
         height: typeof window !== "undefined" ? window.innerHeight : 800,
@@ -113,6 +132,7 @@ export function Canvas({
             gameRef.current.updateSocket(socket);
             gameRef.current.setUserName(userName);
             gameRef.current.onPresenceChange = (users) => setCollaborators(users);
+            gameRef.current.onShapesChange = (count) => setShapeCount(count);
             gameRef.current.onSelectionChange = (shape) => {
                 setSelectedShape(shape);
                 if (shape) {
@@ -136,6 +156,7 @@ export function Canvas({
         g.setStrokeWidth(selectedWidth);
         g.onZoomChange = (z) => setZoomLevel(z);
         g.onPresenceChange = (users) => setCollaborators(users);
+        g.onShapesChange = (count) => setShapeCount(count);
         g.onSelectionChange = (shape) => {
             setSelectedShape(shape);
             if (shape) {
@@ -305,6 +326,25 @@ export function Canvas({
                     onClick={() => setShowStyles((prev) => !prev)}
                     activated={showStyles}
                     icon={<Palette className="w-4 h-4" />}
+                />
+
+                <div className="h-5 w-px bg-zinc-700 mx-0.5" />
+
+                {/* Export PNG */}
+                <IconButton
+                    title="Export Canvas to PNG (High-Res)"
+                    onClick={() => gameRef.current?.exportImage()}
+                    icon={<Download className="w-4 h-4 text-blue-400" />}
+                />
+
+                <div className="h-5 w-px bg-zinc-700 mx-0.5" />
+
+                {/* Dev Command Palette & Tech Nodes */}
+                <IconButton
+                    title="Developer Command Palette & Architecture Nodes (⌘K)"
+                    onClick={() => setIsCommandPaletteOpen(true)}
+                    activated={isCommandPaletteOpen}
+                    icon={<Terminal className="w-4 h-4 text-purple-400" />}
                 />
             </div>
 
@@ -548,18 +588,20 @@ export function Canvas({
                 </button>
             </div>
 
-            {/* Keyboard Shortcuts Hint Bar (Subtle bottom-center hint) */}
-            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none opacity-40 hover:opacity-100 transition-opacity hidden md:flex items-center gap-2.5 text-[11px] text-zinc-400 bg-zinc-950/80 px-3.5 py-1 rounded-full border border-zinc-800">
-                <span><kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-200">V</kbd> Select</span>
-                <span>•</span>
-                <span><kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-200">T</kbd> Text</span>
-                <span>•</span>
-                <span><kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-200">Del</kbd> Delete</span>
-                <span>•</span>
-                <span>Hold <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-200">Space</kbd> Pan</span>
-                <span>•</span>
-                <span><kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-200">Ctrl + Scroll</kbd> Zoom</span>
-            </div>
+            {/* Dev Telemetry HUD Status Bar */}
+            <DevTelemetryBar
+                game={gameRef.current}
+                shapeCount={shapeCount}
+                zoomLevel={zoomLevel}
+                onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+            />
+
+            {/* Developer Command Palette Modal (Cmd+K) */}
+            <DevCommandPalette
+                isOpen={isCommandPaletteOpen}
+                onClose={() => setIsCommandPaletteOpen(false)}
+                game={gameRef.current}
+            />
         </div>
     );
 }

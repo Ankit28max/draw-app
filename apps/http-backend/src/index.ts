@@ -5,10 +5,52 @@ import { middleware } from "./middleware";
 import { CreateUserSchema, SigninSchema, CreateRoomSchema } from "@repo/common/types";
 import { prismaClient } from "@repo/db/client";
 import cors from "cors";
+import crypto from "node:crypto";
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+const corsOrigin = process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(",").map(s => s.trim()) 
+    : "*";
+app.use(cors({ origin: corsOrigin }));
+
+// Enterprise-grade password hashing with cryptographic salt and timing attack protection
+function hashPassword(password: string): string {
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+    return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+    if (!stored.includes(":")) {
+        // Safe backward-compatibility for legacy accounts
+        return password === stored;
+    }
+    const [salt, key] = stored.split(":");
+    if (!salt || !key) return false;
+    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+    return crypto.timingSafeEqual(Buffer.from(key, "hex"), Buffer.from(hash, "hex"));
+}
+
+// Health check endpoint for container probes (Docker / Kubernetes / Railway / AWS)
+app.get("/health", async (_req: Request, res: Response) => {
+    try {
+        await prismaClient.$queryRaw`SELECT 1`;
+        res.json({
+            status: "healthy",
+            service: "http-backend",
+            uptime: Math.round(process.uptime()),
+            timestamp: new Date().toISOString()
+        });
+    } catch (e) {
+        res.status(503).json({
+            status: "unhealthy",
+            error: "Database connection failed",
+            timestamp: new Date().toISOString()
+        });
+    }
+});
 
 app.post("/signup", async (req: Request, res: Response) => {
     const parsedData = CreateUserSchema.safeParse(req.body);
@@ -21,7 +63,7 @@ app.post("/signup", async (req: Request, res: Response) => {
 
     const email = parsedData.data.username.trim().toLowerCase();
     const name = parsedData.data.name?.trim() || email.split("@")[0] || "User";
-    const password = parsedData.data.password;
+    const password = hashPassword(parsedData.data.password);
 
     try {
         const existing = await prismaClient.user.findFirst({
@@ -69,17 +111,16 @@ app.post("/signin", async (req: Request, res: Response) => {
     }
 
     const email = parsedData.data.username.trim().toLowerCase();
-    const password = parsedData.data.password;
+    const rawPassword = parsedData.data.password;
 
     try {
         const user = await prismaClient.user.findFirst({
             where: {
-                email,
-                password
+                email
             }
         });
 
-        if (!user) {
+        if (!user || !verifyPassword(rawPassword, user.password)) {
             res.status(401).json({
                 message: "Invalid username or password"
             });
@@ -194,6 +235,7 @@ app.get("/room/:slug", async (req: Request, res: Response) => {
     });
 });
 
-app.listen(3001, () => {
-    console.log("HTTP backend server running on port 3001");
+const PORT = Number(process.env.PORT || 3001);
+app.listen(PORT, () => {
+    console.log(`HTTP backend server running on port ${PORT}`);
 });

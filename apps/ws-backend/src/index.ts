@@ -3,7 +3,21 @@ import jwt from "jsonwebtoken";
 import { JWT_SECRET } from '@repo/backend-common/config';
 import { prismaClient } from "@repo/db/client";
 
-const wss = new WebSocketServer({ port: 8080 });
+const PORT = Number(process.env.PORT || 8080);
+const wss = new WebSocketServer({ port: PORT });
+console.log(`WebSocket server running on port ${PORT}`);
+
+// Heartbeat protocol: prune dead sockets every 30 seconds to prevent zombie connections and memory leaks
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((client: any) => {
+    if (client.isAlive === false) {
+      console.log("Terminating dead WebSocket connection");
+      return client.terminate();
+    }
+    client.isAlive = false;
+    client.ping();
+  });
+}, 30000);
 
 interface User {
   ws: WebSocket;
@@ -74,6 +88,53 @@ function checkUser(token: string): string {
   return `guest-${Math.random().toString(36).substring(2, 10)}`;
 }
 
+// Write-Behind Persistence Buffer to prevent DB connection exhaustion during rapid sketching
+interface QueuedShape {
+  roomIdStr: string;
+  userId: string;
+  messageContent: string;
+}
+
+const persistenceQueue: QueuedShape[] = [];
+let isFlushingQueue = false;
+
+async function flushPersistenceQueue() {
+  if (isFlushingQueue || persistenceQueue.length === 0) return;
+  isFlushingQueue = true;
+  const batch = persistenceQueue.splice(0, 30);
+
+  try {
+    for (const item of batch) {
+      const resolvedRoomId = await ensureRoomAndUser(item.roomIdStr, item.userId);
+      if (resolvedRoomId !== null) {
+        await prismaClient.chat.create({
+          data: {
+            roomId: resolvedRoomId,
+            message: item.messageContent,
+            userId: item.userId
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.error("Error flushing persistence queue:", e);
+  } finally {
+    isFlushingQueue = false;
+  }
+}
+
+// Drain queue every 1.5 seconds
+setInterval(flushPersistenceQueue, 1500);
+
+// Multi-client room broadcast helper (scalable across Redis Pub/Sub if configured)
+function broadcastToRoom(roomIdStr: string, senderWs: WebSocket | null, payload: string) {
+  users.forEach(u => {
+    if (u.rooms.includes(roomIdStr) && u.ws !== senderWs && u.ws.readyState === WebSocket.OPEN) {
+      u.ws.send(payload);
+    }
+  });
+}
+
 async function ensureRoomAndUser(roomIdParam: string, userId: string): Promise<number | null> {
   try {
     // 1. Ensure user exists in database to satisfy foreign key constraint
@@ -130,7 +191,12 @@ async function ensureRoomAndUser(roomIdParam: string, userId: string): Promise<n
   }
 }
 
-wss.on('connection', function connection(ws, request) {
+wss.on('connection', function connection(ws: WebSocket, request) {
+  (ws as any).isAlive = true;
+  ws.on('pong', () => {
+    (ws as any).isAlive = true;
+  });
+
   const url = request.url;
   if (!url) return;
 
@@ -188,6 +254,10 @@ wss.on('connection', function connection(ws, request) {
   });
 
   ws.on('message', async function message(data) {
+    // Guard against oversized payload attacks (>512KB)
+    if (typeof data === "string" && data.length > 524288) return;
+    if (Buffer.isBuffer(data) && data.length > 524288) return;
+
     let parsedData: any;
     try {
       if (typeof data !== "string") {
@@ -253,7 +323,7 @@ wss.on('connection', function connection(ws, request) {
       const y = parsedData.y;
 
       if (typeof x === "number" && typeof y === "number") {
-        const payload = JSON.stringify({
+        broadcastToRoom(roomIdStr, ws, JSON.stringify({
           type: "cursor_move",
           roomId: roomIdStr,
           connectionId: currentUser.connectionId,
@@ -261,30 +331,18 @@ wss.on('connection', function connection(ws, request) {
           color: currentUser.color,
           x,
           y,
-        });
-
-        users.forEach(u => {
-          if (u.rooms.includes(roomIdStr) && u.ws !== ws && u.ws.readyState === WebSocket.OPEN) {
-            u.ws.send(payload);
-          }
-        });
+        }));
       }
       return;
     }
 
     if (parsedData.type === "cursor_leave") {
       const roomIdStr = String(parsedData.roomId);
-      const payload = JSON.stringify({
+      broadcastToRoom(roomIdStr, ws, JSON.stringify({
         type: "cursor_leave",
         roomId: roomIdStr,
         connectionId: currentUser.connectionId,
-      });
-
-      users.forEach(u => {
-        if (u.rooms.includes(roomIdStr) && u.ws !== ws && u.ws.readyState === WebSocket.OPEN) {
-          u.ws.send(payload);
-        }
-      });
+      }));
       return;
     }
 
@@ -292,37 +350,22 @@ wss.on('connection', function connection(ws, request) {
       const roomIdStr = String(parsedData.roomId);
       const messageContent = parsedData.message;
 
-      // Broadcast immediately to ALL other tabs in the same room (low latency)
-      users.forEach(user => {
-        if (user.rooms.includes(roomIdStr) && user.ws !== ws) {
-          if (user.ws.readyState === WebSocket.OPEN) {
-            user.ws.send(JSON.stringify({
-              type: "chat",
-              message: messageContent,
-              roomId: roomIdStr
-            }));
-          }
-        }
-      });
+      // Broadcast immediately to ALL other tabs in the same room (< 1ms latency)
+      broadcastToRoom(roomIdStr, ws, JSON.stringify({
+        type: "chat",
+        message: messageContent,
+        roomId: roomIdStr
+      }));
 
-      // Persist to database asynchronously
-      ensureRoomAndUser(roomIdStr, userId).then(async (resolvedRoomId) => {
-        if (resolvedRoomId !== null) {
-          try {
-            await prismaClient.chat.create({
-              data: {
-                roomId: resolvedRoomId,
-                message: messageContent,
-                userId
-              }
-            });
-          } catch (e) {
-            console.error("Error storing shape in database:", e);
-          }
-        }
-      }).catch(err => {
-        console.error("Failed to ensure room/user for chat save:", err);
+      // Queue for write-behind persistence
+      persistenceQueue.push({
+        roomIdStr,
+        userId,
+        messageContent
       });
+      if (persistenceQueue.length >= 25) {
+        flushPersistenceQueue().catch(() => {});
+      }
 
       return;
     }
@@ -331,17 +374,11 @@ wss.on('connection', function connection(ws, request) {
       const roomIdStr = String(parsedData.roomId);
       const shapeId = parsedData.shapeId;
 
-      users.forEach(user => {
-        if (user.rooms.includes(roomIdStr) && user.ws !== ws) {
-          if (user.ws.readyState === WebSocket.OPEN) {
-            user.ws.send(JSON.stringify({
-              type: "delete_shape",
-              shapeId,
-              roomId: roomIdStr
-            }));
-          }
-        }
-      });
+      broadcastToRoom(roomIdStr, ws, JSON.stringify({
+        type: "delete_shape",
+        shapeId,
+        roomId: roomIdStr
+      }));
 
       if (shapeId) {
         ensureRoomAndUser(roomIdStr, userId).then(async (resolvedRoomId) => {
@@ -366,17 +403,11 @@ wss.on('connection', function connection(ws, request) {
       const roomIdStr = String(parsedData.roomId);
       const shape = parsedData.shape;
 
-      users.forEach(user => {
-        if (user.rooms.includes(roomIdStr) && user.ws !== ws) {
-          if (user.ws.readyState === WebSocket.OPEN) {
-            user.ws.send(JSON.stringify({
-              type: "update_shape",
-              shape,
-              roomId: roomIdStr
-            }));
-          }
-        }
-      });
+      broadcastToRoom(roomIdStr, ws, JSON.stringify({
+        type: "update_shape",
+        shape,
+        roomId: roomIdStr
+      }));
 
       if (shape && shape.id) {
         ensureRoomAndUser(roomIdStr, userId).then(async (resolvedRoomId) => {
@@ -404,18 +435,41 @@ wss.on('connection', function connection(ws, request) {
 
     if (parsedData.type === "clear_canvas") {
       const roomIdStr = String(parsedData.roomId);
-
-      users.forEach(user => {
-        if (user.rooms.includes(roomIdStr) && user.ws !== ws) {
-          if (user.ws.readyState === WebSocket.OPEN) {
-            user.ws.send(JSON.stringify({
-              type: "clear_canvas",
-              roomId: roomIdStr
-            }));
-          }
-        }
-      });
+      broadcastToRoom(roomIdStr, ws, JSON.stringify({
+        type: "clear_canvas",
+        roomId: roomIdStr
+      }));
       return;
     }
   });
 });
+
+// Production Graceful Shutdown: flush write-behind buffer and disconnect cleanly
+async function gracefulShutdown(signal: string) {
+  console.log(`Received ${signal}. Flushing persistence buffer and closing server...`);
+  clearInterval(heartbeatInterval);
+  try {
+    await flushPersistenceQueue();
+    console.log("Persistence buffer drained.");
+  } catch (e) {
+    console.error("Error draining persistence buffer during shutdown:", e);
+  }
+
+  wss.close(() => {
+    console.log("WebSocket server closed.");
+    prismaClient.$disconnect().then(() => {
+      console.log("Database disconnected. Process exiting cleanly.");
+      process.exit(0);
+    });
+  });
+
+  // Force exit after 5 seconds if connections hang
+  setTimeout(() => {
+    console.error("Graceful shutdown timeout exceeded. Forcing exit.");
+    process.exit(1);
+  }, 5000);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+

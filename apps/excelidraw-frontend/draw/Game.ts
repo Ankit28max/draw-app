@@ -137,6 +137,7 @@ export class Game {
     private isDraggingShape: boolean = false;
     private dragStartWorld: Point = { x: 0, y: 0 };
     private initialShapeState: Shape | null = null;
+    private activeSnapAnchor: Point | null = null;
     onSelectionChange?: (selectedShape: Shape | null) => void;
     onToolChange?: (tool: Tool) => void;
     onStartTextEdit?: (session: TextEditSession) => void;
@@ -341,6 +342,450 @@ export class Game {
         return { ...this.panOffset };
     }
 
+    findSnapAnchor(point: Point): Point | null {
+        const threshold = 18 / this.zoom;
+        let closestAnchor: Point | null = null;
+        let closestDist = Infinity;
+
+        for (const shape of this.existingShapes) {
+            let anchors: Point[] = [];
+            if (shape.type === "rect") {
+                anchors = [
+                    { x: shape.x + shape.width / 2, y: shape.y },
+                    { x: shape.x + shape.width / 2, y: shape.y + shape.height },
+                    { x: shape.x, y: shape.y + shape.height / 2 },
+                    { x: shape.x + shape.width, y: shape.y + shape.height / 2 },
+                ];
+            } else if (shape.type === "circle") {
+                anchors = [
+                    { x: shape.centerX, y: shape.centerY - Math.abs(shape.radius) },
+                    { x: shape.centerX, y: shape.centerY + Math.abs(shape.radius) },
+                    { x: shape.centerX - Math.abs(shape.radius), y: shape.centerY },
+                    { x: shape.centerX + Math.abs(shape.radius), y: shape.centerY },
+                ];
+            } else if (shape.type === "text") {
+                const b = this.getShapeBounds(shape);
+                anchors = [
+                    { x: b.minX + (b.maxX - b.minX) / 2, y: b.minY },
+                    { x: b.minX + (b.maxX - b.minX) / 2, y: b.maxY },
+                    { x: b.minX, y: b.minY + (b.maxY - b.minY) / 2 },
+                    { x: b.maxX, y: b.minY + (b.maxY - b.minY) / 2 },
+                ];
+            }
+
+            for (const a of anchors) {
+                const d = Math.hypot(point.x - a.x, point.y - a.y);
+                if (d < threshold && d < closestDist) {
+                    closestDist = d;
+                    closestAnchor = a;
+                }
+            }
+        }
+
+        return closestAnchor;
+    }
+
+    exportImage(fileName = `vectorcraft-${Date.now()}.png`): string | null {
+        if (this.existingShapes.length === 0) {
+            alert("Canvas is empty. Draw some shapes before exporting!");
+            return null;
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const shape of this.existingShapes) {
+            const bounds = this.getShapeBounds(shape);
+            if (bounds.minX < minX) minX = bounds.minX;
+            if (bounds.minY < minY) minY = bounds.minY;
+            if (bounds.maxX > maxX) maxX = bounds.maxX;
+            if (bounds.maxY > maxY) maxY = bounds.maxY;
+        }
+
+        const padding = 50;
+        const width = Math.max(300, (maxX - minX) + padding * 2);
+        const height = Math.max(200, (maxY - minY) + padding * 2);
+
+        const exportCanvas = document.createElement("canvas");
+        exportCanvas.width = width;
+        exportCanvas.height = height;
+        const exportCtx = exportCanvas.getContext("2d");
+        if (!exportCtx) return null;
+
+        // Draw crisp obsidian background
+        exportCtx.fillStyle = "#0c0d11";
+        exportCtx.fillRect(0, 0, width, height);
+
+        // Draw subtle dot matrix
+        exportCtx.fillStyle = "rgba(255, 255, 255, 0.05)";
+        for (let x = 0; x < width; x += 30) {
+            for (let y = 0; y < height; y += 30) {
+                exportCtx.beginPath();
+                exportCtx.arc(x, y, 1, 0, Math.PI * 2);
+                exportCtx.fill();
+            }
+        }
+
+        // Translate context to render centered diagram
+        exportCtx.save();
+        exportCtx.translate(-minX + padding, -minY + padding);
+
+        const originalCtx = this.ctx;
+        this.ctx = exportCtx;
+        for (const shape of this.existingShapes) {
+            this.renderShape(shape);
+        }
+        this.ctx = originalCtx;
+        exportCtx.restore();
+
+        const dataUrl = exportCanvas.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        return dataUrl;
+    }
+
+    getViewportCenter(): Point {
+        return this.toWorld(this.canvas.width / 2, this.canvas.height / 2);
+    }
+
+    insertShapes(newShapes: Shape[]) {
+        this.undoStack.push(JSON.parse(JSON.stringify(this.existingShapes)));
+        this.redoStack = [];
+        newShapes.forEach((s) => this.existingShapes.push(s));
+        this.clearCanvas();
+        this.onShapesChange?.(this.existingShapes.length);
+
+        newShapes.forEach((shape) => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.socket.send(
+                    JSON.stringify({
+                        type: "chat",
+                        message: JSON.stringify({ shape }),
+                        roomId: this.roomId,
+                    })
+                );
+            }
+        });
+    }
+
+    insertTechComponent(kind: "database" | "redis" | "service" | "queue" | "terminal" | "client") {
+        const center = this.getViewportCenter();
+        const id = (prefix: string) => `dev-${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        if (kind === "database") {
+            const w = 210, h = 130;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#38bdf8",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 16,
+                y: y + 14,
+                text: "🗄️ PostgreSQL\n───────────────\nid: uuid (PK)\nemail: varchar(255)\ncreated_at: timestamp",
+                fontSize: 13,
+                strokeColor: "#38bdf8",
+            };
+            this.insertShapes([rectShape, textShape]);
+        } else if (kind === "redis") {
+            const w = 200, h = 120;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#f87171",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 16,
+                y: y + 14,
+                text: "⚡ Redis Cache\n───────────────\nsessions: TTL 3600s\nrate_limit: sliding_win\neviction: allkeys-lru",
+                fontSize: 13,
+                strokeColor: "#f87171",
+            };
+            this.insertShapes([rectShape, textShape]);
+        } else if (kind === "service") {
+            const w = 220, h = 125;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#c084fc",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 16,
+                y: y + 14,
+                text: "🔌 API Gateway\n───────────────\nGET  /api/v1/auth\nPOST /api/v1/sync\nWS   /live/:roomId",
+                fontSize: 13,
+                strokeColor: "#c084fc",
+            };
+            this.insertShapes([rectShape, textShape]);
+        } else if (kind === "queue") {
+            const w = 210, h = 120;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#34d399",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 16,
+                y: y + 14,
+                text: "📨 Kafka Event Bus\n───────────────\ntopic: canvas.events\npartitions: 6\nacks: all (-1)",
+                fontSize: 13,
+                strokeColor: "#34d399",
+            };
+            this.insertShapes([rectShape, textShape]);
+        } else if (kind === "terminal") {
+            const w = 270, h = 135;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#eab308",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 14,
+                y: y + 12,
+                text: "💻 server.ts\n─────────────────────────\nconst wss = new Server(8080);\nwss.on('conn', handleClient);\nawait prisma.$connect();",
+                fontSize: 12,
+                strokeColor: "#eab308",
+            };
+            this.insertShapes([rectShape, textShape]);
+        } else if (kind === "client") {
+            const w = 190, h = 100;
+            const x = center.x - w / 2, y = center.y - h / 2;
+            const rectShape: Shape = {
+                id: id("rect"),
+                type: "rect",
+                x,
+                y,
+                width: w,
+                height: h,
+                strokeColor: "#60a5fa",
+                strokeWidth: 2,
+            };
+            const textShape: Shape = {
+                id: id("text"),
+                type: "text",
+                x: x + 16,
+                y: y + 14,
+                text: "🌐 Next.js Client\n───────────────\nReact 19 Frontend\nTailwind & Canvas UI",
+                fontSize: 13,
+                strokeColor: "#60a5fa",
+            };
+            this.insertShapes([rectShape, textShape]);
+        }
+    }
+
+    exportMermaid(): string {
+        const nodes: { id: string; label: string; shape: string; bounds: { minX: number; maxX: number; minY: number; maxY: number } }[] = [];
+        const arrows: { fromId?: string; toId?: string }[] = [];
+
+        let nodeCount = 0;
+        for (const s of this.existingShapes) {
+            if (s.type === "rect" || s.type === "circle") {
+                nodeCount++;
+                const b = this.getShapeBounds(s);
+                const internalText = this.existingShapes.find(
+                    (other) =>
+                        other.type === "text" &&
+                        other.x >= b.minX - 15 &&
+                        other.x <= b.maxX + 15 &&
+                        other.y >= b.minY - 15 &&
+                        other.y <= b.maxY + 15
+                );
+                const label =
+                    internalText && internalText.type === "text"
+                        ? internalText.text.split("\n")[0]?.replace(/["\[\]\(\)]/g, "").trim()
+                        : `Service_${nodeCount}`;
+                nodes.push({
+                    id: `node_${nodeCount}`,
+                    label: label || `Service_${nodeCount}`,
+                    shape: s.type === "circle" ? "((" : "[",
+                    bounds: b,
+                });
+            }
+        }
+
+        for (const s of this.existingShapes) {
+            if (s.type === "arrow" || s.type === "line") {
+                const startPt = { x: s.startX, y: s.startY };
+                const endPt = { x: s.endX, y: s.endY };
+
+                let closestFrom: string | undefined;
+                let minDistFrom = 90;
+                for (const n of nodes) {
+                    const cx = (n.bounds.minX + n.bounds.maxX) / 2;
+                    const cy = (n.bounds.minY + n.bounds.maxY) / 2;
+                    const d = Math.hypot(startPt.x - cx, startPt.y - cy);
+                    if (d < minDistFrom) {
+                        minDistFrom = d;
+                        closestFrom = n.id;
+                    }
+                }
+
+                let closestTo: string | undefined;
+                let minDistTo = 90;
+                for (const n of nodes) {
+                    const cx = (n.bounds.minX + n.bounds.maxX) / 2;
+                    const cy = (n.bounds.minY + n.bounds.maxY) / 2;
+                    const d = Math.hypot(endPt.x - cx, endPt.y - cy);
+                    if (d < minDistTo) {
+                        minDistTo = d;
+                        closestTo = n.id;
+                    }
+                }
+
+                if (closestFrom && closestTo && closestFrom !== closestTo) {
+                    arrows.push({ fromId: closestFrom, toId: closestTo });
+                }
+            }
+        }
+
+        let code = "```mermaid\nflowchart LR\n";
+        if (nodes.length === 0) {
+            return "```mermaid\nflowchart LR\n    empty[\"Draw shapes on VectorCraft\"]\n```";
+        }
+
+        nodes.forEach((n) => {
+            const close = n.shape === "((" ? "))" : "]";
+            code += `    ${n.id}${n.shape}"${n.label}"${close}\n`;
+        });
+
+        if (arrows.length > 0) {
+            arrows.forEach((a) => {
+                code += `    ${a.fromId} --> ${a.toId}\n`;
+            });
+        } else if (nodes.length > 1) {
+            for (let i = 0; i < nodes.length - 1; i++) {
+                code += `    ${nodes[i]!.id} -.-> ${nodes[i + 1]!.id}\n`;
+            }
+        }
+
+        code += "```";
+        return code;
+    }
+
+    exportSvg(fileName = `vectorcraft-${Date.now()}.svg`): string | null {
+        if (this.existingShapes.length === 0) {
+            alert("Canvas is empty. Draw some shapes before exporting!");
+            return null;
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const shape of this.existingShapes) {
+            const bounds = this.getShapeBounds(shape);
+            if (bounds.minX < minX) minX = bounds.minX;
+            if (bounds.minY < minY) minY = bounds.minY;
+            if (bounds.maxX > maxX) maxX = bounds.maxX;
+            if (bounds.maxY > maxY) maxY = bounds.maxY;
+        }
+
+        const padding = 40;
+        const width = Math.max(300, maxX - minX + padding * 2);
+        const height = Math.max(200, maxY - minY + padding * 2);
+
+        let svg = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+        svg += `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="background-color: #0c0d11; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">\n`;
+        svg += `  <defs>\n`;
+        svg += `    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n`;
+        svg += `      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffffff" />\n`;
+        svg += `    </marker>\n`;
+        svg += `  </defs>\n`;
+        svg += `  <g transform="translate(${-minX + padding}, ${-minY + padding})">\n`;
+
+        for (const shape of this.existingShapes) {
+            const stroke = shape.strokeColor || "#ffffff";
+            const strokeWidth = shape.strokeWidth || 2;
+
+            if (shape.type === "rect") {
+                svg += `    <rect x="${shape.x}" y="${shape.y}" width="${shape.width}" height="${shape.height}" rx="8" fill="rgba(255,255,255,0.02)" stroke="${stroke}" stroke-width="${strokeWidth}" />\n`;
+            } else if (shape.type === "circle") {
+                svg += `    <circle cx="${shape.centerX}" cy="${shape.centerY}" r="${Math.abs(shape.radius)}" fill="rgba(255,255,255,0.02)" stroke="${stroke}" stroke-width="${strokeWidth}" />\n`;
+            } else if (shape.type === "line") {
+                svg += `    <line x1="${shape.startX}" y1="${shape.startY}" x2="${shape.endX}" y2="${shape.endY}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" />\n`;
+            } else if (shape.type === "arrow") {
+                svg += `    <line x1="${shape.startX}" y1="${shape.startY}" x2="${shape.endX}" y2="${shape.endY}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" marker-end="url(#arrow)" />\n`;
+            } else if (shape.type === "pencil" && shape.points && shape.points.length > 0) {
+                const pts = shape.points.map((p) => `${p.x},${p.y}`).join(" ");
+                svg += `    <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />\n`;
+            } else if (shape.type === "text") {
+                const lines = (shape.text || "").split("\n");
+                const fs = shape.fontSize || 16;
+                lines.forEach((line, i) => {
+                    svg += `    <text x="${shape.x}" y="${shape.y + (i + 1) * fs * 1.2}" fill="${stroke}" font-size="${fs}" font-weight="bold">${line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</text>\n`;
+                });
+            }
+        }
+
+        svg += `  </g>\n</svg>`;
+
+        const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        return svg;
+    }
+
+    exportJson(fileName = `vectorcraft-${Date.now()}.json`): string {
+        const payload = JSON.stringify(this.existingShapes, null, 2);
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return payload;
+    }
+
     commitText(
         id: string | undefined,
         text: string,
@@ -438,8 +883,88 @@ export class Game {
             }
         }
         this.existingShapes = merged;
+
+        if (this.existingShapes.length === 0) {
+            const starterShapes = this.getStarterTemplateShapes();
+            if (starterShapes.length > 0) {
+                this.existingShapes = starterShapes;
+                starterShapes.forEach((shape) => {
+                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                        this.socket.send(
+                            JSON.stringify({
+                                type: "chat",
+                                message: JSON.stringify({ shape }),
+                                roomId: this.roomId,
+                            })
+                        );
+                    }
+                });
+            }
+        }
+
         this.onShapesChange?.(this.existingShapes.length);
         this.clearCanvas();
+    }
+
+    private getStarterTemplateShapes(): Shape[] {
+        const id = (prefix: string) => `tpl-${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const r = this.roomId.toLowerCase();
+
+        if (r.includes("architecture")) {
+            return [
+                { id: id("t1"), type: "text", x: 200, y: 100, text: "System Architecture Overview", fontSize: 28, strokeColor: "#ffffff" },
+                { id: id("r1"), type: "rect", x: 200, y: 180, width: 170, height: 90, strokeColor: "#3b82f6", strokeWidth: 2 },
+                { id: id("t2"), type: "text", x: 220, y: 215, text: "Frontend App\n(Next.js 15)", fontSize: 16, strokeColor: "#3b82f6" },
+                { id: id("r2"), type: "rect", x: 470, y: 180, width: 180, height: 90, strokeColor: "#a855f7", strokeWidth: 2 },
+                { id: id("t3"), type: "text", x: 490, y: 215, text: "API Gateway\n(Express & WS)", fontSize: 16, strokeColor: "#a855f7" },
+                { id: id("a1"), type: "arrow", startX: 370, startY: 225, endX: 470, endY: 225, strokeColor: "#ffffff", strokeWidth: 2 },
+                { id: id("r3"), type: "rect", x: 750, y: 130, width: 170, height: 80, strokeColor: "#22c55e", strokeWidth: 2 },
+                { id: id("t4"), type: "text", x: 770, y: 160, text: "Redis Pub/Sub\n(Broadcast)", fontSize: 16, strokeColor: "#22c55e" },
+                { id: id("a2"), type: "arrow", startX: 650, startY: 210, endX: 750, endY: 170, strokeColor: "#22c55e", strokeWidth: 2 },
+                { id: id("r4"), type: "rect", x: 750, y: 250, width: 170, height: 80, strokeColor: "#eab308", strokeWidth: 2 },
+                { id: id("t5"), type: "text", x: 770, y: 280, text: "PostgreSQL DB\n(Prisma ORM)", fontSize: 16, strokeColor: "#eab308" },
+                { id: id("a3"), type: "arrow", startX: 650, startY: 240, endX: 750, endY: 290, strokeColor: "#eab308", strokeWidth: 2 },
+            ];
+        }
+
+        if (r.includes("database")) {
+            return [
+                { id: id("t1"), type: "text", x: 200, y: 100, text: "Database Schema (ER Diagram)", fontSize: 28, strokeColor: "#ffffff" },
+                { id: id("r1"), type: "rect", x: 200, y: 180, width: 220, height: 160, strokeColor: "#3b82f6", strokeWidth: 2 },
+                { id: id("t2"), type: "text", x: 220, y: 200, text: "User Table\n───────────────\nid: String (PK)\nemail: String\nname: String\npassword: Hash", fontSize: 15, strokeColor: "#3b82f6" },
+                { id: id("r2"), type: "rect", x: 540, y: 180, width: 220, height: 160, strokeColor: "#a855f7", strokeWidth: 2 },
+                { id: id("t3"), type: "text", x: 560, y: 200, text: "Room Table\n───────────────\nid: Int (PK)\nslug: String (Unique)\nadminId: String (FK)\ncreatedAt: DateTime", fontSize: 15, strokeColor: "#a855f7" },
+                { id: id("a1"), type: "arrow", startX: 420, startY: 260, endX: 540, endY: 260, strokeColor: "#ffffff", strokeWidth: 2 },
+            ];
+        }
+
+        if (r.includes("userflow")) {
+            return [
+                { id: id("t1"), type: "text", x: 200, y: 100, text: "User Journey & Onboarding Funnel", fontSize: 28, strokeColor: "#ffffff" },
+                { id: id("c1"), type: "circle", centerX: 260, centerY: 230, radius: 45, strokeColor: "#22c55e", strokeWidth: 2 },
+                { id: id("t2"), type: "text", x: 235, y: 220, text: "Start\nLanding", fontSize: 14, strokeColor: "#22c55e" },
+                { id: id("a1"), type: "arrow", startX: 305, startY: 230, endX: 400, endY: 230, strokeColor: "#ffffff", strokeWidth: 2 },
+                { id: id("r1"), type: "rect", x: 400, y: 190, width: 140, height: 80, strokeColor: "#3b82f6", strokeWidth: 2 },
+                { id: id("t3"), type: "text", x: 425, y: 220, text: "Enter Room\nor Sign Up", fontSize: 14, strokeColor: "#3b82f6" },
+                { id: id("a2"), type: "arrow", startX: 540, startY: 230, endX: 630, endY: 230, strokeColor: "#ffffff", strokeWidth: 2 },
+                { id: id("r2"), type: "rect", x: 630, y: 190, width: 160, height: 80, strokeColor: "#eab308", strokeWidth: 2 },
+                { id: id("t4"), type: "text", x: 650, y: 220, text: "Interactive Canvas\nCollaboration", fontSize: 14, strokeColor: "#eab308" },
+            ];
+        }
+
+        if (r.includes("sprint")) {
+            return [
+                { id: id("t1"), type: "text", x: 200, y: 100, text: "Sprint Retrospective & Brainstorm", fontSize: 28, strokeColor: "#ffffff" },
+                { id: id("r1"), type: "rect", x: 200, y: 180, width: 200, height: 200, strokeColor: "#22c55e", strokeWidth: 2 },
+                { id: id("t2"), type: "text", x: 220, y: 200, text: "What Went Well\n───────────────\n• Fast WebSocket sync\n• Clean dark theme\n• Snappy peer cursors", fontSize: 14, strokeColor: "#22c55e" },
+                { id: id("r2"), type: "rect", x: 450, y: 180, width: 200, height: 200, strokeColor: "#ef4444", strokeWidth: 2 },
+                { id: id("t3"), type: "text", x: 470, y: 200, text: "What to Improve\n───────────────\n• Mobile touch latency\n• More diagram icons\n• PDF export support", fontSize: 14, strokeColor: "#ef4444" },
+                { id: id("r3"), type: "rect", x: 700, y: 180, width: 200, height: 200, strokeColor: "#3b82f6", strokeWidth: 2 },
+                { id: id("t4"), type: "text", x: 720, y: 200, text: "Action Items\n───────────────\n• Add Redis cluster\n• Expand templates\n• Ship v2.0", fontSize: 14, strokeColor: "#3b82f6" },
+            ];
+        }
+
+        return [];
     }
 
     initHandlers() {
@@ -632,6 +1157,26 @@ export class Game {
             if (previewShape) {
                 this.renderShape(previewShape);
             }
+        }
+
+        // Magnetic smart snap anchor indicator
+        if (this.activeSnapAnchor) {
+            this.ctx.save();
+            this.ctx.fillStyle = "#38bdf8";
+            this.ctx.strokeStyle = "#ffffff";
+            this.ctx.lineWidth = 2 / this.zoom;
+            this.ctx.beginPath();
+            this.ctx.arc(this.activeSnapAnchor.x, this.activeSnapAnchor.y, 6 / this.zoom, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.stroke();
+
+            // Outer subtle pulse ring
+            this.ctx.strokeStyle = "rgba(56, 189, 248, 0.5)";
+            this.ctx.lineWidth = 1.5 / this.zoom;
+            this.ctx.beginPath();
+            this.ctx.arc(this.activeSnapAnchor.x, this.activeSnapAnchor.y, 11 / this.zoom, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.restore();
         }
 
         this.ctx.restore();
@@ -1083,6 +1628,15 @@ export class Game {
             return;
         }
 
+        if (this.selectedTool === "line" || this.selectedTool === "arrow") {
+            const snap = this.findSnapAnchor(worldPos);
+            if (snap) {
+                worldPos = snap;
+                this.startWorldPoint = snap;
+                this.currentWorldPoint = snap;
+            }
+        }
+
         this.clicked = true;
 
         if (this.selectedTool === "eraser") {
@@ -1193,7 +1747,22 @@ export class Game {
             return;
         }
 
-        if (!this.clicked) return;
+        if (this.selectedTool === "line" || this.selectedTool === "arrow") {
+            const snap = this.findSnapAnchor(worldPos);
+            this.activeSnapAnchor = snap;
+            if (snap) {
+                worldPos = snap;
+            }
+        } else {
+            this.activeSnapAnchor = null;
+        }
+
+        if (!this.clicked) {
+            if (this.activeSnapAnchor) {
+                this.clearCanvas();
+            }
+            return;
+        }
 
         this.currentWorldPoint = worldPos;
 
@@ -1249,7 +1818,14 @@ export class Game {
             return;
         }
 
-        const worldPos = this.toWorld(e.clientX, e.clientY);
+        let worldPos = this.toWorld(e.clientX, e.clientY);
+        if (this.selectedTool === "line" || this.selectedTool === "arrow") {
+            const snap = this.findSnapAnchor(worldPos);
+            if (snap) {
+                worldPos = snap;
+            }
+        }
+        this.activeSnapAnchor = null;
         const finalShape = this.createCurrentShape(worldPos, true);
 
         if (!finalShape) return;
