@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type SVGProps } from "react";
 import Link from "next/link";
 import {
     Activity,
@@ -453,7 +453,7 @@ CREATE INDEX "Chat_roomId_idx" ON "Chat"("roomId");`;
     );
 }
 
-function LaptopIcon(props: any) {
+function LaptopIcon(props: SVGProps<SVGSVGElement>) {
     return (
         <svg
             {...props}

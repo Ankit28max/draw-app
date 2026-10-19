@@ -21,7 +21,8 @@ import {
     Shield,
     Play,
     Activity,
-    Layers
+    Layers,
+    type LucideIcon
 } from "lucide-react";
 import { Game } from "@/draw/Game";
 
@@ -36,7 +37,7 @@ interface CommandItem {
     title: string;
     description: string;
     category: "Architecture Components" | "System Design Templates" | "Dev Exports" | "Canvas Actions";
-    icon: any;
+    icon: LucideIcon;
     color: string;
     shortcut?: string;
     action: () => void;
@@ -440,7 +441,7 @@ export function DevCommandPalette({ isOpen, onClose, game }: DevCommandPalettePr
                 <div className="overflow-y-auto flex-1 p-2 space-y-1 divide-y divide-zinc-800/40">
                     {filtered.length === 0 ? (
                         <div className="py-12 text-center text-zinc-500 text-sm">
-                            No developer commands found for "{search}"
+                            No developer commands found for &quot;{search}&quot;
                         </div>
                     ) : (
                         filtered.map((item, index) => {

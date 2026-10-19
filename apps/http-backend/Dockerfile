@@ -15,4 +15,4 @@ RUN pnpm --filter http-backend run build
 
 EXPOSE 3001
 
-CMD ["node", "apps/http-backend/dist/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma && node apps/http-backend/dist/index.js"]

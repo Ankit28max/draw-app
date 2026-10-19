@@ -410,7 +410,7 @@ export function Canvas({
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="font-semibold flex items-center justify-between">
-                                        <span className="truncate text-cyan-200 font-bold">This App's Architecture</span>
+                                        <span className="truncate text-cyan-200 font-bold">This App&apos;s Architecture</span>
                                         <span className="text-[9px] text-cyan-400 font-mono font-bold bg-cyan-500/20 px-1 py-0.5 rounded">FEATURED</span>
                                     </div>
                                     <div className="text-[10px] text-zinc-400 truncate">Next.js, WS :8080, HTTP :3001, Write-Behind & DB</div>
@@ -771,7 +771,7 @@ export function Canvas({
                     <span className="capitalize font-medium text-blue-400 flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
                         {selectedShape.type === "tech_node"
-                            ? `${(selectedShape as any).title || "Architecture Icon"}`
+                            ? `${selectedShape.title || "Architecture Icon"}`
                             : `${selectedShape.type} selected`}
                     </span>
                     <span className="text-zinc-600">|</span>
