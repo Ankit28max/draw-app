@@ -20,6 +20,9 @@ RUN pnpm --filter excelidraw-frontend run build
 EXPOSE 3000
 
 ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 ENV NODE_ENV=production
 
-CMD ["pnpm", "--filter", "excelidraw-frontend", "start"]
+WORKDIR /app/apps/excelidraw-frontend
+
+CMD ["pnpm", "start"]
