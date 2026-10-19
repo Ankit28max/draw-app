@@ -780,7 +780,7 @@ export class Game {
 
         // Automatically switch to select tool and select the newly inserted tech node so user can drag it immediately
         this.setTool("select");
-        this.selectedShapeId = nodeShape.id;
+        this.selectedShapeId = nodeShape.id ?? null;
         this.initialShapeState = JSON.parse(JSON.stringify(nodeShape));
         this.onSelectionChange?.(nodeShape);
         this.onToolChange?.("select");

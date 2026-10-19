@@ -1,11 +1,44 @@
+import http from "node:http";
 import { WebSocket, WebSocketServer } from 'ws';
 import jwt from "jsonwebtoken";
 import { JWT_SECRET } from '@repo/backend-common/config';
 import { prismaClient } from "@repo/db/client";
 
 const PORT = Number(process.env.PORT || 8080);
-const wss = new WebSocketServer({ port: PORT });
-console.log(`WebSocket server running on port ${PORT}`);
+
+// HTTP server to handle health checks and container probes
+const server = http.createServer(async (req, res) => {
+  const url = req.url?.split("?")[0];
+  if (url === "/health" || url === "/") {
+    let dbStatus = "unknown";
+    try {
+      await prismaClient.$queryRaw`SELECT 1`;
+      dbStatus = "connected";
+    } catch {
+      dbStatus = "disconnected";
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      status: "healthy",
+      service: "ws-backend",
+      database: dbStatus,
+      activeConnections: wss.clients.size,
+      uptime: Math.round(process.uptime()),
+      timestamp: new Date().toISOString()
+    }));
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Not Found" }));
+});
+
+const wss = new WebSocketServer({ server });
+
+server.listen(PORT, () => {
+  console.log(`WebSocket and HTTP health server running on port ${PORT}`);
+});
 
 // Heartbeat protocol: prune dead sockets every 30 seconds to prevent zombie connections and memory leaks
 const heartbeatInterval = setInterval(() => {
@@ -491,6 +524,7 @@ async function gracefulShutdown(signal: string) {
     console.error("Error draining persistence buffer during shutdown:", e);
   }
 
+  server.close();
   wss.close(() => {
     console.log("WebSocket server closed.");
     prismaClient.$disconnect().then(() => {

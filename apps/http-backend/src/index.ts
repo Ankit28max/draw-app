@@ -35,6 +35,15 @@ function verifyPassword(password: string, stored: string): boolean {
 
 // Health check endpoint for container probes (Docker / Kubernetes / Railway / AWS)
 app.get("/health", async (_req: Request, res: Response) => {
+    if (!process.env.DATABASE_URL) {
+        res.status(503).json({
+            status: "unhealthy",
+            error: "DATABASE_URL environment variable is missing",
+            timestamp: new Date().toISOString()
+        });
+        return;
+    }
+
     try {
         await prismaClient.$queryRaw`SELECT 1`;
         res.json({
@@ -43,10 +52,13 @@ app.get("/health", async (_req: Request, res: Response) => {
             uptime: Math.round(process.uptime()),
             timestamp: new Date().toISOString()
         });
-    } catch (e) {
+    } catch (e: unknown) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error("Health check DB connection error:", errorMsg);
         res.status(503).json({
             status: "unhealthy",
             error: "Database connection failed",
+            detail: errorMsg,
             timestamp: new Date().toISOString()
         });
     }
