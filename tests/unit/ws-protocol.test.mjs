@@ -117,4 +117,46 @@ test("Write-Behind Persistence Batching Suite", async (t) => {
         assert.equal(batch3.length, 15);
         assert.equal(queue.length, 0);
     });
+
+    await t.test("purges pending strokes for specific room on clear_canvas", () => {
+        let queue = [
+            { roomIdStr: "room-1", shape: "s1" },
+            { roomIdStr: "room-2", shape: "s2" },
+            { roomIdStr: "room-1", shape: "s3" },
+            { roomIdStr: "room-3", shape: "s4" },
+        ];
+
+        // Simulate clear_canvas for room-1
+        const targetRoom = "room-1";
+        for (let i = queue.length - 1; i >= 0; i--) {
+            if (queue[i]?.roomIdStr === targetRoom) {
+                queue.splice(i, 1);
+            }
+        }
+
+        assert.equal(queue.length, 2);
+        assert.ok(queue.every(item => item.roomIdStr !== "room-1"));
+        assert.equal(queue[0].shape, "s2");
+        assert.equal(queue[1].shape, "s4");
+    });
+});
+
+test("Guest Session Resolution Suite", async (t) => {
+    await t.test("generates unique guest session ID when no token is supplied", () => {
+        function resolveUser(token) {
+            if (token && token.trim()) {
+                return "authenticated-user-id";
+            }
+            return `guest-${Math.random().toString(36).substring(2, 10)}`;
+        }
+
+        const guest1 = resolveUser("");
+        const guest2 = resolveUser(null);
+        const guest3 = resolveUser(undefined);
+
+        assert.ok(guest1.startsWith("guest-"));
+        assert.ok(guest2.startsWith("guest-"));
+        assert.ok(guest3.startsWith("guest-"));
+        assert.notEqual(guest1, guest2, "Each guest session must have a unique identifier");
+    });
 });

@@ -4,8 +4,6 @@ import { WS_URL } from "@/config";
 import { useEffect, useRef, useState } from "react";
 import { Canvas } from "./Canvas";
 
-const FALLBACK_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3Njg0NDMwYy04YzNiLTRlZmQtOGFmNS00YzQwMzdmNjJkYzMiLCJpYXQiOjE3MzcyOTg2NjV9.xacFop0s231DoUVeLZormeIbBmIRaXftTVVI6weIqFo";
-
 function getCollaboratorName(): string {
     if (typeof window === "undefined") return "Collaborator";
     const saved = localStorage.getItem("userName");
@@ -35,8 +33,10 @@ export function RoomCanvas({roomId}: {roomId: string}) {
         function connect() {
             if (isUnmounted) return;
 
-            const token = (typeof window !== "undefined" && localStorage.getItem("token")) || FALLBACK_TOKEN;
-            ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
+            // Use authentic token if user is signed in, otherwise initiate guest session
+            const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+            const wsEndpoint = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+            ws = new WebSocket(wsEndpoint);
 
             ws.onopen = () => {
                 if (isUnmounted) {

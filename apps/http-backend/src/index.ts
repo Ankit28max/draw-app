@@ -235,6 +235,40 @@ app.get("/room/:slug", async (req: Request, res: Response) => {
     });
 });
 
+app.delete("/chats/:roomId", async (req: Request, res: Response) => {
+    try {
+        const rawRoomId = req.params.roomId;
+        if (!rawRoomId) {
+            res.status(400).json({ success: false, message: "Missing roomId" });
+            return;
+        }
+
+        const roomIdParam = String(rawRoomId);
+        let roomId = Number(roomIdParam);
+
+        if (isNaN(roomId)) {
+            const room = await prismaClient.room.findFirst({
+                where: { slug: roomIdParam.trim().toLowerCase() }
+            });
+            if (room) {
+                roomId = room.id;
+            } else {
+                res.json({ success: true, count: 0 });
+                return;
+            }
+        }
+
+        const deleted = await prismaClient.chat.deleteMany({
+            where: { roomId }
+        });
+
+        res.json({ success: true, count: deleted.count });
+    } catch (e) {
+        console.error("Error clearing chats:", e);
+        res.status(500).json({ success: false, message: "Failed to clear chats" });
+    }
+});
+
 const PORT = Number(process.env.PORT || 3001);
 app.listen(PORT, () => {
     console.log(`HTTP backend server running on port ${PORT}`);

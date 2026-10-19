@@ -439,10 +439,36 @@ wss.on('connection', function connection(ws: WebSocket, request) {
 
     if (parsedData.type === "clear_canvas") {
       const roomIdStr = String(parsedData.roomId);
+
+      // 1. Broadcast clear event to all clients in this room immediately
       broadcastToRoom(roomIdStr, ws, JSON.stringify({
         type: "clear_canvas",
         roomId: roomIdStr
       }));
+
+      // 2. Clear any pending unpersisted strokes for this room from the write-behind buffer
+      for (let i = persistenceQueue.length - 1; i >= 0; i--) {
+        if (persistenceQueue[i]?.roomIdStr === roomIdStr) {
+          persistenceQueue.splice(i, 1);
+        }
+      }
+
+      // 3. Delete all persisted shapes/chats from the database for this room
+      ensureRoomAndUser(roomIdStr, userId).then(async (resolvedRoomId) => {
+        if (resolvedRoomId !== null) {
+          try {
+            await prismaClient.chat.deleteMany({
+              where: { roomId: resolvedRoomId }
+            });
+            console.log(`Successfully cleared all persisted shapes for room ${roomIdStr} (id: ${resolvedRoomId})`);
+          } catch (e) {
+            console.error(`Error deleting canvas chats for room ${roomIdStr}:`, e);
+          }
+        }
+      }).catch((e) => {
+        console.error("ensureRoomAndUser error during clear_canvas:", e);
+      });
+
       return;
     }
 

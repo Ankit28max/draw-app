@@ -3,6 +3,10 @@
   "private": true,
   "scripts": {
     "build": "turbo build",
+    "build:http": "pnpm --filter @repo/db run db:generate && pnpm --filter http-backend run build",
+    "build:ws": "pnpm --filter @repo/db run db:generate && pnpm --filter ws-backend run build",
+    "start:http": "node apps/http-backend/dist/index.js",
+    "start:ws": "node apps/ws-backend/dist/index.js",
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",

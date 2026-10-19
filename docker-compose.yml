@@ -7,7 +7,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Error: POSTGRES_PASSWORD must be defined in your .env file}
       POSTGRES_DB: ${POSTGRES_DB:-vectorcraft}
     ports:
       - "5432:5432"
@@ -30,9 +30,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vectorcraft}
-      JWT_SECRET: ${JWT_SECRET:-super-secure-production-jwt-secret-replace-me}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vectorcraft}
+      JWT_SECRET: ${JWT_SECRET:?Error: JWT_SECRET must be defined in your .env file}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,8 +48,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vectorcraft}
-      JWT_SECRET: ${JWT_SECRET:-super-secure-production-jwt-secret-replace-me}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vectorcraft}
+      JWT_SECRET: ${JWT_SECRET:?Error: JWT_SECRET must be defined in your .env file}
     depends_on:
       postgres:
         condition: service_healthy
