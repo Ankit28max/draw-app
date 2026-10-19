@@ -156,7 +156,7 @@ export class Game {
     onSimulationChange?: (isActive: boolean) => void;
 
     // Selection & Manipulation
-    private selectedShapeId: string | null = null;
+    private selectedShapeId: string | null | undefined = null;
     private isDraggingShape: boolean = false;
     private isResizingShape: boolean = false;
     private activeResizeHandle: ResizeHandle | null = null;
@@ -1016,7 +1016,7 @@ export class Game {
                 this.redoStack = [];
                 shape.text = text;
                 if (color) shape.strokeColor = color;
-                this.selectedShapeId = shape.id;
+                this.selectedShapeId = shape.id ?? null;
                 this.initialShapeState = JSON.parse(JSON.stringify(shape));
                 this.onSelectionChange?.(shape);
                 this.clearCanvas();
@@ -1045,7 +1045,7 @@ export class Game {
                 this.ctx.restore();
                 shape.width = Math.max(140, Math.min(300, maxW + 44));
 
-                this.selectedShapeId = shape.id;
+                this.selectedShapeId = shape.id ?? null;
                 this.initialShapeState = JSON.parse(JSON.stringify(shape));
                 this.onSelectionChange?.(shape);
                 this.clearCanvas();
@@ -1065,7 +1065,7 @@ export class Game {
             this.undoStack.push([...this.existingShapes]);
             this.redoStack = [];
             this.existingShapes.push(newShape);
-            this.selectedShapeId = newShape.id;
+            this.selectedShapeId = newShape.id ?? null;
             this.initialShapeState = JSON.parse(JSON.stringify(newShape));
             this.onSelectionChange?.(newShape);
             this.clearCanvas();
