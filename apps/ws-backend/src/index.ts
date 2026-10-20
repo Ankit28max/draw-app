@@ -125,6 +125,9 @@ function checkUser(token: string): string {
   return `guest-${Math.random().toString(36).substring(2, 10)}`;
 }
 
+// In-memory active room cache for instant multiplayer catch-up sync (<1ms)
+const activeRoomShapes: Map<string, Map<string, any>> = new Map();
+
 // Write-Behind Persistence Buffer to prevent DB connection exhaustion during rapid sketching
 interface QueuedShape {
   roomIdStr: string;
@@ -193,35 +196,43 @@ async function ensureRoomAndUser(roomIdParam: string, userId: string): Promise<n
     }
 
     // 2. Ensure room exists in database to satisfy foreign key constraint
-    const numericId = Number(roomIdParam);
-    if (!isNaN(numericId)) {
-      let room = await prismaClient.room.findUnique({
-        where: { id: numericId }
-      });
-      if (!room) {
+    const cleanSlug = roomIdParam.trim().toLowerCase();
+    const numericId = Number(cleanSlug);
+
+    // Look for existing room by slug, prefixed slug, or numeric id
+    let room = await prismaClient.room.findFirst({
+      where: {
+        OR: [
+          { slug: cleanSlug },
+          { slug: `room-${cleanSlug}` },
+          ...(!isNaN(numericId) ? [{ id: numericId }] : [])
+        ]
+      }
+    });
+
+    if (!room) {
+      try {
         room = await prismaClient.room.create({
           data: {
-            slug: `room-${numericId}`,
+            slug: cleanSlug,
             adminId: dbUser.id
           }
         });
-      }
-      return room.id;
-    } else {
-      const slug = roomIdParam.trim().toLowerCase();
-      let room = await prismaClient.room.findFirst({
-        where: { slug }
-      });
-      if (!room) {
-        room = await prismaClient.room.create({
-          data: {
-            slug,
-            adminId: dbUser.id
+      } catch {
+        // Fallback in case of concurrent room creation race condition
+        room = await prismaClient.room.findFirst({
+          where: {
+            OR: [
+              { slug: cleanSlug },
+              { slug: `room-${cleanSlug}` },
+              ...(!isNaN(numericId) ? [{ id: numericId }] : [])
+            ]
           }
         });
       }
-      return room.id;
     }
+
+    return room?.id ?? null;
   } catch (e) {
     console.error("ensureRoomAndUser error:", e);
     return null;
@@ -331,8 +342,53 @@ wss.on('connection', function connection(ws: WebSocket, request) {
           userId: currentUser.userId
         }));
       }
-      // Ensure the room exists in background
-      ensureRoomAndUser(roomIdStr, userId).catch(() => {});
+
+      // Instant catch-up sync: send current room shapes to newly joined client (<1ms)
+      const cachedMap = activeRoomShapes.get(roomIdStr);
+      if (cachedMap && cachedMap.size > 0) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: "room_shapes_sync",
+            roomId: roomIdStr,
+            shapes: Array.from(cachedMap.values())
+          }));
+        }
+      } else {
+        // Hydrate from PostgreSQL database if room is not yet cached in memory
+        ensureRoomAndUser(roomIdStr, userId).then(async (resolvedRoomId) => {
+          if (resolvedRoomId !== null) {
+            try {
+              const chats = await prismaClient.chat.findMany({
+                where: { roomId: resolvedRoomId },
+                orderBy: { id: "asc" },
+                take: 1000
+              });
+              const map = new Map<string, any>();
+              for (const c of chats) {
+                try {
+                  const data = typeof c.message === "string" ? JSON.parse(c.message) : c.message;
+                  if (data && data.shape && data.shape.id) {
+                    map.set(data.shape.id, data.shape);
+                  }
+                } catch {}
+              }
+              if (map.size > 0) {
+                activeRoomShapes.set(roomIdStr, map);
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({
+                    type: "room_shapes_sync",
+                    roomId: roomIdStr,
+                    shapes: Array.from(map.values())
+                  }));
+                }
+              }
+            } catch (e) {
+              console.error("Error hydrating room shapes:", e);
+            }
+          }
+        }).catch(() => {});
+      }
+
       // Broadcast updated presence to all participants in this room
       broadcastRoomPresence(roomIdStr);
       return;
@@ -387,6 +443,17 @@ wss.on('connection', function connection(ws: WebSocket, request) {
       const roomIdStr = String(parsedData.roomId);
       const messageContent = parsedData.message;
 
+      // Update in-memory active room cache for instant catch-up sync
+      try {
+        const parsed = typeof messageContent === "string" ? JSON.parse(messageContent) : messageContent;
+        if (parsed && parsed.shape && parsed.shape.id) {
+          if (!activeRoomShapes.has(roomIdStr)) {
+            activeRoomShapes.set(roomIdStr, new Map());
+          }
+          activeRoomShapes.get(roomIdStr)!.set(parsed.shape.id, parsed.shape);
+        }
+      } catch {}
+
       // Broadcast immediately to ALL other tabs in the same room (< 1ms latency)
       broadcastToRoom(roomIdStr, ws, JSON.stringify({
         type: "chat",
@@ -410,6 +477,11 @@ wss.on('connection', function connection(ws: WebSocket, request) {
     if (parsedData.type === "delete_shape") {
       const roomIdStr = String(parsedData.roomId);
       const shapeId = parsedData.shapeId;
+
+      // Remove from in-memory room cache
+      if (shapeId && activeRoomShapes.has(roomIdStr)) {
+        activeRoomShapes.get(roomIdStr)!.delete(shapeId);
+      }
 
       broadcastToRoom(roomIdStr, ws, JSON.stringify({
         type: "delete_shape",
@@ -439,6 +511,14 @@ wss.on('connection', function connection(ws: WebSocket, request) {
     if (parsedData.type === "update_shape") {
       const roomIdStr = String(parsedData.roomId);
       const shape = parsedData.shape;
+
+      // Update in-memory room cache
+      if (shape && shape.id) {
+        if (!activeRoomShapes.has(roomIdStr)) {
+          activeRoomShapes.set(roomIdStr, new Map());
+        }
+        activeRoomShapes.get(roomIdStr)!.set(shape.id, shape);
+      }
 
       broadcastToRoom(roomIdStr, ws, JSON.stringify({
         type: "update_shape",
@@ -472,6 +552,9 @@ wss.on('connection', function connection(ws: WebSocket, request) {
 
     if (parsedData.type === "clear_canvas") {
       const roomIdStr = String(parsedData.roomId);
+
+      // Clear from in-memory cache
+      activeRoomShapes.delete(roomIdStr);
 
       // 1. Broadcast clear event to all clients in this room immediately
       broadcastToRoom(roomIdStr, ws, JSON.stringify({

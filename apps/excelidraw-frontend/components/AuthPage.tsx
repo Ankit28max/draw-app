@@ -19,34 +19,57 @@ export function AuthPage({ isSignin }: { isSignin: boolean }) {
         setError("");
         setLoading(true);
 
+        const payload = isSignin
+            ? { username: username.trim(), password }
+            : { username: username.trim(), password, name: name.trim() || username.trim() };
+
         try {
-            if (isSignin) {
-                const res = await axios.post(`${HTTP_BACKEND}/signin`, {
-                    username: username.trim(),
-                    password
-                });
-                if (res.data?.token) {
-                    localStorage.setItem("token", res.data.token);
-                    if (res.data.name) localStorage.setItem("userName", res.data.name);
-                    router.push("/");
-                } else {
-                    setError(res.data?.message || "Sign in failed");
+            let res: any = null;
+            let success = false;
+            let errorMessage = "";
+
+            // 1. Primary: Same-Origin API proxy (/api/auth/...) - bypasses CORS & build-time host issues
+            try {
+                const proxyEndpoint = isSignin ? "/api/auth/signin" : "/api/auth/signup";
+                res = await axios.post(proxyEndpoint, payload, { timeout: 8000 });
+                if (res.data?.token || res.data?.userId) {
+                    success = true;
+                } else if (res.data?.message) {
+                    errorMessage = res.data.message;
                 }
+            } catch (proxyErr: any) {
+                if (axios.isAxiosError(proxyErr) && proxyErr.response?.data?.message) {
+                    errorMessage = proxyErr.response.data.message;
+                }
+            }
+
+            // 2. Fallback: Direct backend call if proxy was unavailable
+            if (!success && (!errorMessage || errorMessage.includes("unavailable"))) {
+                try {
+                    const directEndpoint = `${HTTP_BACKEND}/${isSignin ? "signin" : "signup"}`;
+                    const directRes = await axios.post(directEndpoint, payload, { timeout: 8000 });
+                    if (directRes.data?.token || directRes.data?.userId) {
+                        res = directRes;
+                        success = true;
+                        errorMessage = "";
+                    } else if (directRes.data?.message) {
+                        errorMessage = directRes.data.message;
+                    }
+                } catch (directErr: any) {
+                    if (axios.isAxiosError(directErr) && directErr.response?.data?.message) {
+                        errorMessage = directErr.response.data.message;
+                    }
+                }
+            }
+
+            if (res && res.data?.token) {
+                localStorage.setItem("token", res.data.token);
+                if (res.data.name) localStorage.setItem("userName", res.data.name);
+                router.push("/");
+            } else if (res && res.data?.userId && !isSignin) {
+                router.push("/signin");
             } else {
-                const res = await axios.post(`${HTTP_BACKEND}/signup`, {
-                    username: username.trim(),
-                    password,
-                    name: name.trim() || username.trim()
-                });
-                if (res.data?.token) {
-                    localStorage.setItem("token", res.data.token);
-                    if (res.data.name) localStorage.setItem("userName", res.data.name);
-                    router.push("/");
-                } else if (res.data?.userId) {
-                    router.push("/signin");
-                } else {
-                    setError(res.data?.message || "Sign up failed");
-                }
+                setError(errorMessage || (isSignin ? "Invalid username or password" : "Sign up failed. Please try another username/email."));
             }
         } catch (err: unknown) {
             if (axios.isAxiosError(err)) {

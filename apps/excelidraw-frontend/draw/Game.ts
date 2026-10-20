@@ -1683,17 +1683,16 @@ export class Game {
 
     private getStarterTemplateShapes(): Shape[] {
         const r = this.roomId.toLowerCase();
-        if (r.includes("tinyurl") || r.includes("url")) {
+        if (r === "hld-this-app" || r.includes("this-app")) {
+            this.loadArchitectureTemplate("hld_this_app");
+        } else if (r.includes("tinyurl") || r.includes("url")) {
             this.loadArchitectureTemplate("hld_tinyurl");
         } else if (r.includes("state") || r.includes("saga")) {
             this.loadArchitectureTemplate("lld_state_machine");
-        } else if (r.includes("database") || r.includes("erd") || r.includes("schema")) {
+        } else if (r.includes("erd") || r.includes("schema")) {
             this.loadArchitectureTemplate("lld_erd");
-        } else if (r.includes("uber") || r.includes("stream") || r.includes("kafka")) {
+        } else if (r.includes("uber")) {
             this.loadArchitectureTemplate("hld_uber");
-        } else {
-            // Default to VectorCraft's own live system architecture
-            this.loadArchitectureTemplate("hld_this_app");
         }
         return this.existingShapes;
     }
@@ -1717,6 +1716,22 @@ export class Game {
                 if (message.type === "init") {
                     this.myConnectionId = message.connectionId;
                     this.myColor = message.color;
+                    return;
+                }
+
+                if (message.type === "room_shapes_sync") {
+                    if (Array.isArray(message.shapes) && message.shapes.length > 0) {
+                        const existingMap = new Map<string, Shape>();
+                        this.existingShapes.forEach((s) => {
+                            if (s.id) existingMap.set(s.id, s);
+                        });
+                        message.shapes.forEach((s: Shape) => {
+                            if (s.id) existingMap.set(s.id, s);
+                        });
+                        this.existingShapes = Array.from(existingMap.values());
+                        this.clearCanvas();
+                        this.onShapesChange?.(this.existingShapes.length);
+                    }
                     return;
                 }
 
@@ -1765,7 +1780,14 @@ export class Game {
                 }
 
                 if (message.type === "chat") {
-                    const parsedShape = JSON.parse(message.message);
+                    let parsedShape: any = message.message;
+                    if (typeof parsedShape === "string") {
+                        try {
+                            parsedShape = JSON.parse(parsedShape);
+                        } catch {
+                            parsedShape = null;
+                        }
+                    }
                     if (parsedShape && parsedShape.shape) {
                         const newShape: Shape = parsedShape.shape;
                         // Avoid adding duplicates if shape already exists

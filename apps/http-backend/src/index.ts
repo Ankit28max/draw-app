@@ -13,7 +13,12 @@ app.use(express.json());
 const corsOrigin = process.env.CORS_ORIGIN 
     ? process.env.CORS_ORIGIN.split(",").map(s => s.trim()) 
     : "*";
-app.use(cors({ origin: corsOrigin }));
+app.use(cors({
+    origin: corsOrigin,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"]
+}));
+app.options("*", cors());
 
 // Enterprise-grade password hashing with cryptographic salt and timing attack protection
 function hashPassword(password: string): string {
@@ -23,14 +28,22 @@ function hashPassword(password: string): string {
 }
 
 function verifyPassword(password: string, stored: string): boolean {
+    if (!stored || typeof stored !== "string") return false;
     if (!stored.includes(":")) {
         // Safe backward-compatibility for legacy accounts
         return password === stored;
     }
     const [salt, key] = stored.split(":");
     if (!salt || !key) return false;
-    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-    return crypto.timingSafeEqual(Buffer.from(key, "hex"), Buffer.from(hash, "hex"));
+    try {
+        const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+        const keyBuf = Buffer.from(key, "hex");
+        const hashBuf = Buffer.from(hash, "hex");
+        if (keyBuf.length !== hashBuf.length) return false;
+        return crypto.timingSafeEqual(keyBuf, hashBuf);
+    } catch {
+        return false;
+    }
 }
 
 // Health check endpoint for container probes (Docker / Kubernetes / Railway / AWS)
@@ -105,10 +118,17 @@ app.post("/signup", async (req: Request, res: Response) => {
             token,
             name: user.name
         });
-    } catch (e) {
+    } catch (e: any) {
         console.error("Signup error:", e);
+        const detail = e instanceof Error ? e.message : String(e);
+        if (detail.includes("connect") || detail.includes("database") || detail.includes("PrismaClientInitializationError") || detail.includes("Can't reach database")) {
+            res.status(503).json({
+                message: "Database unavailable. Please check backend DATABASE_URL configuration."
+            });
+            return;
+        }
         res.status(500).json({
-            message: "Internal server error during registration"
+            message: "Internal server error during registration. Please try again."
         });
     }
 });
@@ -148,11 +168,35 @@ app.post("/signin", async (req: Request, res: Response) => {
             userId: user.id,
             name: user.name
         });
-    } catch (e) {
+    } catch (e: any) {
         console.error("Signin error:", e);
+        const detail = e instanceof Error ? e.message : String(e);
+        if (detail.includes("connect") || detail.includes("database") || detail.includes("PrismaClientInitializationError") || detail.includes("Can't reach database")) {
+            res.status(503).json({
+                message: "Database unavailable. Please check backend DATABASE_URL configuration."
+            });
+            return;
+        }
         res.status(500).json({
-            message: "Internal server error during login"
+            message: "Internal server error during login. Please try again."
         });
+    }
+});
+
+app.get("/me", middleware, async (req: Request, res: Response) => {
+    try {
+        const userId = ((req as any).userId as string) || "";
+        const user = await prismaClient.user.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, email: true }
+        });
+        if (!user) {
+            res.status(404).json({ message: "User not found" });
+            return;
+        }
+        res.json({ user });
+    } catch (e) {
+        res.status(500).json({ message: "Error fetching user profile" });
     }
 });
 
@@ -192,24 +236,28 @@ app.get("/chats/:roomId", async (req: Request, res: Response) => {
             return;
         }
 
-        const roomIdParam = String(rawRoomId);
-        let roomId = Number(roomIdParam);
+        const cleanSlug = String(rawRoomId).trim().toLowerCase();
+        const numericId = Number(cleanSlug);
 
-        if (isNaN(roomId)) {
-            const room = await prismaClient.room.findFirst({
-                where: { slug: roomIdParam.trim().toLowerCase() }
-            });
-            if (room) {
-                roomId = room.id;
-            } else {
-                res.json({ messages: [] });
-                return;
+        // Find room by slug, prefixed slug, or numeric id
+        const room = await prismaClient.room.findFirst({
+            where: {
+                OR: [
+                    { slug: cleanSlug },
+                    { slug: `room-${cleanSlug}` },
+                    ...(!isNaN(numericId) ? [{ id: numericId }] : [])
+                ]
             }
+        });
+
+        if (!room) {
+            res.json({ messages: [] });
+            return;
         }
 
         const messages = await prismaClient.chat.findMany({
             where: {
-                roomId: roomId
+                roomId: room.id
             },
             orderBy: {
                 id: "asc"
@@ -235,10 +283,16 @@ app.get("/room/:slug", async (req: Request, res: Response) => {
         return;
     }
 
-    const slug = String(rawSlug);
+    const cleanSlug = String(rawSlug).trim().toLowerCase();
+    const numericId = Number(cleanSlug);
+
     const room = await prismaClient.room.findFirst({
         where: {
-            slug
+            OR: [
+                { slug: cleanSlug },
+                { slug: `room-${cleanSlug}` },
+                ...(!isNaN(numericId) ? [{ id: numericId }] : [])
+            ]
         }
     });
 
@@ -255,23 +309,26 @@ app.delete("/chats/:roomId", async (req: Request, res: Response) => {
             return;
         }
 
-        const roomIdParam = String(rawRoomId);
-        let roomId = Number(roomIdParam);
+        const cleanSlug = String(rawRoomId).trim().toLowerCase();
+        const numericId = Number(cleanSlug);
 
-        if (isNaN(roomId)) {
-            const room = await prismaClient.room.findFirst({
-                where: { slug: roomIdParam.trim().toLowerCase() }
-            });
-            if (room) {
-                roomId = room.id;
-            } else {
-                res.json({ success: true, count: 0 });
-                return;
+        const room = await prismaClient.room.findFirst({
+            where: {
+                OR: [
+                    { slug: cleanSlug },
+                    { slug: `room-${cleanSlug}` },
+                    ...(!isNaN(numericId) ? [{ id: numericId }] : [])
+                ]
             }
+        });
+
+        if (!room) {
+            res.json({ success: true, count: 0 });
+            return;
         }
 
         const deleted = await prismaClient.chat.deleteMany({
-            where: { roomId }
+            where: { roomId: room.id }
         });
 
         res.json({ success: true, count: deleted.count });
